@@ -545,6 +545,7 @@ namespace PinShotWin
 
         private readonly AppSettings settings;
         private readonly Bitmap desktopBitmap;
+        private readonly Bitmap dimmedDesktopBitmap;
         private readonly Rectangle virtualBounds;
         private Rectangle selectedBounds;
         private Rectangle hoverBounds;
@@ -562,6 +563,7 @@ namespace PinShotWin
             IsOpen = true;
             virtualBounds = SystemInformation.VirtualScreen;
             desktopBitmap = ScreenshotHelper.CaptureVirtualScreen(virtualBounds);
+            dimmedDesktopBitmap = ScreenshotHelper.CreateDimmedBitmap(desktopBitmap);
 
             FormBorderStyle = FormBorderStyle.None;
             StartPosition = FormStartPosition.Manual;
@@ -589,6 +591,7 @@ namespace PinShotWin
 
         protected override void OnClosed(EventArgs e)
         {
+            dimmedDesktopBitmap.Dispose();
             desktopBitmap.Dispose();
             IsOpen = false;
             base.OnClosed(e);
@@ -749,12 +752,7 @@ namespace PinShotWin
         protected override void OnPaint(PaintEventArgs e)
         {
             var g = e.Graphics;
-            g.DrawImage(desktopBitmap, ClientRectangle);
-
-            using (var shade = new SolidBrush(Color.FromArgb(110, Color.Black)))
-            {
-                g.FillRectangle(shade, ClientRectangle);
-            }
+            g.DrawImage(dimmedDesktopBitmap, ClientRectangle);
 
             var rect = previewMode ? selectedBounds : (dragging ? selectedBounds : TranslateScreenToClient(hoverBounds));
             if (rect.Width > 0 && rect.Height > 0)
@@ -1518,6 +1516,20 @@ namespace PinShotWin
             using (var g = Graphics.FromImage(bitmap))
             {
                 g.CopyFromScreen(bounds.Left, bounds.Top, 0, 0, bounds.Size, CopyPixelOperation.SourceCopy);
+            }
+            return bitmap;
+        }
+
+        public static Bitmap CreateDimmedBitmap(Bitmap source)
+        {
+            var bitmap = new Bitmap(source.Width, source.Height, PixelFormat.Format32bppArgb);
+            using (var g = Graphics.FromImage(bitmap))
+            {
+                g.DrawImage(source, 0, 0, source.Width, source.Height);
+                using (var shade = new SolidBrush(Color.FromArgb(110, Color.Black)))
+                {
+                    g.FillRectangle(shade, 0, 0, source.Width, source.Height);
+                }
             }
             return bitmap;
         }
