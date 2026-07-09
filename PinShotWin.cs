@@ -1247,7 +1247,10 @@ namespace PinShotWin
     {
         private readonly Bitmap image;
         private readonly ContextMenuStrip pinMenu;
+        private readonly ToolStripMenuItem lockMenuItem;
+        private readonly ToolStripMenuItem opacityMenuItem;
         private bool dragging;
+        private bool locked;
         private Point dragOffset;
         private double scale = 1.0;
 
@@ -1264,10 +1267,25 @@ namespace PinShotWin
             KeyPreview = true;
 
             pinMenu = new ContextMenuStrip();
-            pinMenu.Items.Add("复制", null, delegate { CopyPinnedImage(); });
-            pinMenu.Items.Add("保存", null, delegate { SavePinnedImage(); });
+            pinMenu.Opening += delegate { RefreshPinMenu(); };
+            pinMenu.Items.Add("Copy", null, delegate { CopyPinnedImage(); });
+            pinMenu.Items.Add("Save", null, delegate { SavePinnedImage(); });
+            lockMenuItem = new ToolStripMenuItem("Lock position");
+            lockMenuItem.Click += delegate
+            {
+                locked = !locked;
+                Cursor = locked ? Cursors.Default : Cursors.SizeAll;
+            };
+            pinMenu.Items.Add(lockMenuItem);
+            opacityMenuItem = new ToolStripMenuItem("Opacity");
+            AddOpacityItem("100%", 1.0);
+            AddOpacityItem("90%", 0.9);
+            AddOpacityItem("75%", 0.75);
+            AddOpacityItem("60%", 0.6);
+            AddOpacityItem("45%", 0.45);
+            pinMenu.Items.Add(opacityMenuItem);
             pinMenu.Items.Add(new ToolStripSeparator());
-            pinMenu.Items.Add("关闭", null, delegate { Close(); });
+            pinMenu.Items.Add("Close", null, delegate { Close(); });
             ContextMenuStrip = pinMenu;
         }
 
@@ -1292,7 +1310,7 @@ namespace PinShotWin
         protected override void OnMouseDown(MouseEventArgs e)
         {
             Activate();
-            if (e.Button == MouseButtons.Left)
+            if (!locked && e.Button == MouseButtons.Left)
             {
                 dragging = true;
                 dragOffset = e.Location;
@@ -1314,7 +1332,7 @@ namespace PinShotWin
 
         protected override void OnMouseMove(MouseEventArgs e)
         {
-            if (dragging)
+            if (!locked && dragging)
             {
                 var screen = PointToScreen(e.Location);
                 Location = new Point(screen.X - dragOffset.X, screen.Y - dragOffset.Y);
@@ -1337,6 +1355,11 @@ namespace PinShotWin
 
         protected override void OnMouseWheel(MouseEventArgs e)
         {
+            if (locked)
+            {
+                return;
+            }
+
             var oldScale = scale;
             scale *= e.Delta > 0 ? 1.1 : 0.9;
             scale = Math.Max(0.15, Math.Min(6.0, scale));
@@ -1375,6 +1398,31 @@ namespace PinShotWin
                         ? ImageSaveFormat.Png
                         : ImageSaveFormat.Jpg;
                     ImageFile.Save(image, dialog.FileName, format, 90);
+                }
+            }
+        }
+
+        private void AddOpacityItem(string label, double value)
+        {
+            var item = new ToolStripMenuItem(label);
+            item.Tag = value;
+            item.Click += delegate
+            {
+                Opacity = value;
+            };
+            opacityMenuItem.DropDownItems.Add(item);
+        }
+
+        private void RefreshPinMenu()
+        {
+            lockMenuItem.Checked = locked;
+            foreach (ToolStripItem item in opacityMenuItem.DropDownItems)
+            {
+                var menuItem = item as ToolStripMenuItem;
+                if (menuItem != null && menuItem.Tag is double)
+                {
+                    double value = (double)menuItem.Tag;
+                    menuItem.Checked = Math.Abs(Opacity - value) < 0.01;
                 }
             }
         }
