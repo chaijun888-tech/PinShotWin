@@ -2,6 +2,8 @@
 
 Windows tray screenshot tool.
 
+Current version: `0.1.0`
+
 ## Build
 
 ```powershell

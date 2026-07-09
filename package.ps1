@@ -4,6 +4,9 @@ $releaseRoot = Join-Path $PSScriptRoot "release"
 $releaseDir = Join-Path $releaseRoot "PinShotWin"
 $zipPath = Join-Path $releaseRoot "PinShotWin.zip"
 $exePath = Join-Path $PSScriptRoot "bin\PinShotWin.exe"
+$versionPath = Join-Path $PSScriptRoot "VERSION"
+$version = (Get-Content -LiteralPath $versionPath -Raw).Trim()
+$versionedZipPath = Join-Path $releaseRoot "PinShotWin-$version.zip"
 
 if (-not (Test-Path -LiteralPath $exePath)) {
     & (Join-Path $PSScriptRoot "build.ps1")
@@ -15,9 +18,12 @@ New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
 Copy-Item -LiteralPath $exePath -Destination (Join-Path $releaseDir "PinShotWin.exe") -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot "installer\install.ps1") -Destination (Join-Path $releaseDir "install.ps1") -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot "installer\uninstall.ps1") -Destination (Join-Path $releaseDir "uninstall.ps1") -Force
+Copy-Item -LiteralPath $versionPath -Destination (Join-Path $releaseDir "VERSION.txt") -Force
 
-$readme = @'
+$readme = @"
 PinShotWin
+
+Version: $version
 
 Quick start:
 1. Double-click PinShotWin.exe. The app runs in the system tray.
@@ -42,11 +48,14 @@ Usage:
 7. Recent screenshots are in-memory only, keep latest 10, and clear on exit.
 
 If Windows shows an unknown publisher warning, choose "More info" and continue.
-'@
+"@
 
 Set-Content -LiteralPath (Join-Path $releaseDir "README.txt") -Value $readme -Encoding UTF8
 
 Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $versionedZipPath -Force -ErrorAction SilentlyContinue
 Compress-Archive -LiteralPath $releaseDir -DestinationPath $zipPath -Force
+Copy-Item -LiteralPath $zipPath -Destination $versionedZipPath -Force
 
 Write-Host "Packaged $zipPath"
+Write-Host "Packaged $versionedZipPath"
