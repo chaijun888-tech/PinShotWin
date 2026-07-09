@@ -2,8 +2,10 @@ $ErrorActionPreference = "Stop"
 
 $appName = "PinShotWin"
 $sourceExe = Join-Path $PSScriptRoot "PinShotWin.exe"
+$sourceVersion = Join-Path $PSScriptRoot "VERSION.txt"
 $installDir = Join-Path $env:LOCALAPPDATA $appName
 $installExe = Join-Path $installDir "PinShotWin.exe"
+$installVersion = Join-Path $installDir "VERSION.txt"
 $desktopShortcut = Join-Path ([Environment]::GetFolderPath("DesktopDirectory")) "$appName.lnk"
 $startMenuDir = Join-Path ([Environment]::GetFolderPath("Programs")) $appName
 $startMenuShortcut = Join-Path $startMenuDir "$appName.lnk"
@@ -18,6 +20,9 @@ if (-not (Test-Path -LiteralPath $sourceExe)) {
 New-Item -ItemType Directory -Force -Path $installDir | Out-Null
 Copy-Item -LiteralPath $sourceExe -Destination $installExe -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot "uninstall.ps1") -Destination $uninstallScript -Force
+if (Test-Path -LiteralPath $sourceVersion) {
+    Copy-Item -LiteralPath $sourceVersion -Destination $installVersion -Force
+}
 
 $shell = New-Object -ComObject WScript.Shell
 
@@ -45,4 +50,8 @@ New-Item -Path $runKeyPath -Force | Out-Null
 Set-ItemProperty -Path $runKeyPath -Name $appName -Value "`"$installExe`""
 
 Write-Host "$appName installed to $installDir"
+if (Test-Path -LiteralPath $installVersion) {
+    $version = (Get-Content -LiteralPath $installVersion -Raw).Trim()
+    Write-Host "Version: $version"
+}
 Write-Host "Desktop and Start Menu shortcuts were created. Startup is enabled."

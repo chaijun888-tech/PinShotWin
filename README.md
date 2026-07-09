@@ -32,6 +32,8 @@ Install:
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
+The installer copies `VERSION.txt` to `%LOCALAPPDATA%\PinShotWin`.
+
 Uninstall:
 
 ```powershell
