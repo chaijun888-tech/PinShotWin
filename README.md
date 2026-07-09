@@ -65,5 +65,5 @@ powershell -ExecutionPolicy Bypass -File .\uninstall.ps1
 - Drag pinned images
 - Mouse-wheel scale while pointer is over pinned image
 - Double-click pinned image to close
-- Right-click pinned image menu: copy, save, lock position, opacity, close
+- Right-click pinned image menu: copy, save, lock position/锁定位置, opacity/透明度, close
 - In-memory recent history keeps the latest 10 captures

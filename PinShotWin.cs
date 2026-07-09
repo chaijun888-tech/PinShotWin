@@ -1323,16 +1323,16 @@ namespace PinShotWin
 
             pinMenu = new ContextMenuStrip();
             pinMenu.Opening += delegate { RefreshPinMenu(); };
-            pinMenu.Items.Add("Copy", null, delegate { CopyPinnedImage(); });
-            pinMenu.Items.Add("Save", null, delegate { SavePinnedImage(); });
-            lockMenuItem = new ToolStripMenuItem("Lock position");
+            pinMenu.Items.Add("复制", null, delegate { CopyPinnedImage(); });
+            pinMenu.Items.Add("保存", null, delegate { SavePinnedImage(); });
+            lockMenuItem = new ToolStripMenuItem("锁定位置");
             lockMenuItem.Click += delegate
             {
                 locked = !locked;
                 Cursor = locked ? Cursors.Default : Cursors.SizeAll;
             };
             pinMenu.Items.Add(lockMenuItem);
-            opacityMenuItem = new ToolStripMenuItem("Opacity");
+            opacityMenuItem = new ToolStripMenuItem("透明度");
             AddOpacityItem("100%", 1.0);
             AddOpacityItem("90%", 0.9);
             AddOpacityItem("75%", 0.75);
@@ -1340,7 +1340,7 @@ namespace PinShotWin
             AddOpacityItem("45%", 0.45);
             pinMenu.Items.Add(opacityMenuItem);
             pinMenu.Items.Add(new ToolStripSeparator());
-            pinMenu.Items.Add("Close", null, delegate { Close(); });
+            pinMenu.Items.Add("关闭", null, delegate { Close(); });
             ContextMenuStrip = pinMenu;
         }
 
