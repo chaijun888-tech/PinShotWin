@@ -26,6 +26,7 @@ bin\PinShotWin.exe
 ## Features
 
 - Tray-only app
+- Recent screenshot history from tray menu
 - Configurable screenshot hotkey
 - Start with Windows toggle
 - JPG/PNG save format setting
@@ -39,3 +40,4 @@ bin\PinShotWin.exe
 - Mouse-wheel scale while pointer is over pinned image
 - Double-click pinned image to close
 - Right-click pinned image menu: copy, save, close
+- In-memory recent history keeps the latest 10 captures

@@ -27,6 +27,7 @@ namespace PinShotWin
     {
         private readonly NotifyIcon tray;
         private readonly HotkeyWindow hotkeyWindow;
+        private readonly ToolStripMenuItem recentMenu;
         private AppSettings settings;
 
         public TrayContext()
@@ -40,7 +41,10 @@ namespace PinShotWin
             RegisterCurrentHotkey();
 
             var menu = new ContextMenuStrip();
+            menu.Opening += delegate { RefreshRecentMenu(); };
             menu.Items.Add("设置", null, delegate { ShowSettings(); });
+            recentMenu = new ToolStripMenuItem("最近截图");
+            menu.Items.Add(recentMenu);
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("退出", null, delegate { ExitThread(); });
 
@@ -89,7 +93,112 @@ namespace PinShotWin
             }
 
             var overlay = new CaptureOverlay(settings);
+            overlay.CaptureCompleted += delegate(object sender, BitmapEventArgs e)
+            {
+                ScreenshotHistory.Add(e.Bitmap);
+            };
             overlay.Show();
+        }
+
+        private void RefreshRecentMenu()
+        {
+            recentMenu.DropDownItems.Clear();
+            var items = ScreenshotHistory.Items;
+            if (items.Count == 0)
+            {
+                var empty = recentMenu.DropDownItems.Add("暂无截图");
+                empty.Enabled = false;
+                return;
+            }
+
+            for (int i = 0; i < items.Count; i++)
+            {
+                var item = items[i];
+                var menuItem = new ToolStripMenuItem((i + 1) + ". " + item.CreatedAt.ToString("HH:mm:ss") + "  " + item.Image.Width + "x" + item.Image.Height);
+                Bitmap image = item.Image;
+                menuItem.DropDownItems.Add("复制", null, delegate { Clipboard.SetImage((Bitmap)image.Clone()); });
+                menuItem.DropDownItems.Add("保存", null, delegate { SaveHistoryImage(image); });
+                menuItem.DropDownItems.Add("钉住", null, delegate { new PinWindow((Bitmap)image.Clone(), Cursor.Position).Show(); });
+                recentMenu.DropDownItems.Add(menuItem);
+            }
+
+            recentMenu.DropDownItems.Add(new ToolStripSeparator());
+            recentMenu.DropDownItems.Add("清空", null, delegate
+            {
+                ScreenshotHistory.Clear();
+                RefreshRecentMenu();
+            });
+        }
+
+        private void SaveHistoryImage(Bitmap image)
+        {
+            using (var dialog = new SaveFileDialog())
+            {
+                dialog.Title = "保存历史截图";
+                dialog.FileName = "screenshot_" + DateTime.Now.ToString("yyyyMMdd_HHmmss");
+                dialog.Filter = "JPG 图片 (*.jpg)|*.jpg|PNG 图片 (*.png)|*.png";
+                dialog.DefaultExt = "jpg";
+
+                if (dialog.ShowDialog() == DialogResult.OK)
+                {
+                    ImageSaveFormat format = Path.GetExtension(dialog.FileName).Equals(".png", StringComparison.OrdinalIgnoreCase)
+                        ? ImageSaveFormat.Png
+                        : ImageSaveFormat.Jpg;
+                    ImageFile.Save(image, dialog.FileName, format, settings.JpegQuality);
+                }
+            }
+        }
+    }
+
+    internal sealed class BitmapEventArgs : EventArgs
+    {
+        public Bitmap Bitmap { get; private set; }
+
+        public BitmapEventArgs(Bitmap bitmap)
+        {
+            Bitmap = bitmap;
+        }
+    }
+
+    internal sealed class HistoryItem
+    {
+        public Bitmap Image;
+        public DateTime CreatedAt;
+    }
+
+    internal static class ScreenshotHistory
+    {
+        private const int MaxItems = 10;
+        private static readonly List<HistoryItem> items = new List<HistoryItem>();
+
+        public static List<HistoryItem> Items
+        {
+            get { return new List<HistoryItem>(items); }
+        }
+
+        public static void Add(Bitmap bitmap)
+        {
+            items.Insert(0, new HistoryItem
+            {
+                Image = (Bitmap)bitmap.Clone(),
+                CreatedAt = DateTime.Now
+            });
+
+            while (items.Count > MaxItems)
+            {
+                var last = items[items.Count - 1];
+                items.RemoveAt(items.Count - 1);
+                last.Image.Dispose();
+            }
+        }
+
+        public static void Clear()
+        {
+            foreach (var item in items)
+            {
+                item.Image.Dispose();
+            }
+            items.Clear();
         }
     }
 
@@ -432,6 +541,7 @@ namespace PinShotWin
     internal sealed class CaptureOverlay : Form
     {
         public static bool IsOpen;
+        public event EventHandler<BitmapEventArgs> CaptureCompleted;
 
         private readonly AppSettings settings;
         private readonly Bitmap desktopBitmap;
@@ -704,6 +814,7 @@ namespace PinShotWin
                     return;
                 }
 
+                RaiseCaptureCompleted(bitmap);
                 Clipboard.SetImage((Bitmap)bitmap.Clone());
             }
             Close();
@@ -738,6 +849,7 @@ namespace PinShotWin
                             return;
                         }
 
+                        RaiseCaptureCompleted(bitmap);
                         ImageFile.Save(bitmap, dialog.FileName, format, settings.JpegQuality);
                     }
                     Close();
@@ -757,8 +869,18 @@ namespace PinShotWin
                 var pinLocation = new Point(virtualBounds.X + selectedBounds.X + 16, virtualBounds.Y + selectedBounds.Y + 16);
                 var pin = new PinWindow((Bitmap)bitmap.Clone(), pinLocation);
                 pin.Show();
+                RaiseCaptureCompleted(bitmap);
             }
             Close();
+        }
+
+        private void RaiseCaptureCompleted(Bitmap bitmap)
+        {
+            var handler = CaptureCompleted;
+            if (handler != null)
+            {
+                handler(this, new BitmapEventArgs(bitmap));
+            }
         }
 
         private Rectangle TranslateScreenToClient(Rectangle screenRect)
