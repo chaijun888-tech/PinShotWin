@@ -42,6 +42,8 @@ The installer copies `VERSION.txt` to `%LOCALAPPDATA%\PinShotWin`.
 
 Release packages include SHA256 checksum files for integrity checks.
 
+The installer stops a running PinShotWin process before upgrading files.
+
 Uninstall:
 
 ```powershell

@@ -12,6 +12,7 @@
 - Added tray About dialog with version and configuration details.
 - Added settings for hotkey, startup, save format, and JPG quality.
 - Added user install/uninstall scripts and release packaging.
+- Installer now stops a running app before replacing the executable.
 - Added installed version metadata via `VERSION.txt`.
 - Added SHA256 checksum generation for release packages.
 - Added app icon and release zip generation.

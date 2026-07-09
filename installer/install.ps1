@@ -17,6 +17,13 @@ if (-not (Test-Path -LiteralPath $sourceExe)) {
     throw "PinShotWin.exe was not found. Run install.ps1 from the release package folder."
 }
 
+$running = Get-Process $appName -ErrorAction SilentlyContinue
+if ($running) {
+    Write-Host "Stopping running $appName before install..."
+    $running | Stop-Process -Force
+    Start-Sleep -Milliseconds 300
+}
+
 New-Item -ItemType Directory -Force -Path $installDir | Out-Null
 Copy-Item -LiteralPath $sourceExe -Destination $installExe -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot "uninstall.ps1") -Destination $uninstallScript -Force
