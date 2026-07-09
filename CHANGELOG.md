@@ -9,6 +9,7 @@
 - Added keyboard nudge and resize for preview selection.
 - Added pinned images with drag, mouse-wheel scale, double-click close, right-click copy/save/lock/opacity/close, and `Ctrl+C`.
 - Added in-memory recent screenshot history from tray menu.
+- Added tray About dialog with version and configuration details.
 - Added settings for hotkey, startup, save format, and JPG quality.
 - Added user install/uninstall scripts and release packaging.
 - Added installed version metadata via `VERSION.txt`.

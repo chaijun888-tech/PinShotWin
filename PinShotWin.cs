@@ -58,6 +58,7 @@ namespace PinShotWin
             menu.Items.Add("设置", null, delegate { ShowSettings(); });
             recentMenu = new ToolStripMenuItem("最近截图");
             menu.Items.Add(recentMenu);
+            menu.Items.Add("关于", null, delegate { ShowAbout(); });
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("退出", null, delegate { ExitThread(); });
 
@@ -96,6 +97,20 @@ namespace PinShotWin
                     RegisterCurrentHotkey();
                 }
             }
+        }
+
+        private void ShowAbout()
+        {
+            var version = AppVersion.Current;
+            var message =
+                "PinShotWin " + version + Environment.NewLine +
+                "Hotkey: " + settings.Hotkey + Environment.NewLine +
+                "Save: " + settings.SaveFormat + " / JPG " + settings.JpegQuality + "%" + Environment.NewLine +
+                "Startup: " + (settings.StartWithWindows ? "On" : "Off") + Environment.NewLine +
+                "Exe: " + Application.ExecutablePath + Environment.NewLine +
+                "Settings: " + AppSettings.SettingsFilePath;
+
+            MessageBox.Show(message, "About PinShotWin", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
 
         private void StartCapture()
@@ -222,6 +237,11 @@ namespace PinShotWin
         public ImageSaveFormat SaveFormat = ImageSaveFormat.Jpg;
         public int JpegQuality = 90;
 
+        public static string SettingsFilePath
+        {
+            get { return SettingsPath; }
+        }
+
         private static string SettingsPath
         {
             get
@@ -305,6 +325,18 @@ namespace PinShotWin
     {
         Jpg,
         Png
+    }
+
+    internal static class AppVersion
+    {
+        public static string Current
+        {
+            get
+            {
+                var version = Application.ProductVersion;
+                return string.IsNullOrEmpty(version) ? "unknown" : version;
+            }
+        }
     }
 
     internal static class AppIcon

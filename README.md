@@ -57,7 +57,7 @@ powershell -ExecutionPolicy Bypass -File .\uninstall.ps1
 ## Features
 
 - Tray-only app
-- Recent screenshot history from tray menu
+- Recent screenshot history and About dialog from tray menu
 - Configurable screenshot hotkey
 - Start with Windows toggle
 - JPG/PNG save format setting
