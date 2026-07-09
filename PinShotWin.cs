@@ -496,6 +496,28 @@ namespace PinShotWin
             {
                 CopySelection();
                 e.Handled = true;
+                return;
+            }
+
+            if (previewMode && e.Control && e.KeyCode == Keys.S)
+            {
+                SaveSelection();
+                e.Handled = true;
+                return;
+            }
+
+            if (previewMode && e.Control && e.KeyCode == Keys.P)
+            {
+                PinSelection();
+                e.Handled = true;
+                return;
+            }
+
+            if (previewMode && e.KeyCode == Keys.Enter)
+            {
+                CopySelection();
+                e.Handled = true;
+                return;
             }
 
             base.OnKeyDown(e);
@@ -632,6 +654,7 @@ namespace PinShotWin
                 if (previewMode)
                 {
                     DrawSelectionHandles(g, rect);
+                    DrawSelectionSize(g, rect);
                 }
             }
         }
@@ -858,6 +881,30 @@ namespace PinShotWin
             }
         }
 
+        private static void DrawSelectionSize(Graphics g, Rectangle rect)
+        {
+            string text = rect.Width + " x " + rect.Height;
+            using (var font = new Font("Segoe UI", 8.5F, FontStyle.Regular))
+            {
+                var size = g.MeasureString(text, font);
+                int width = (int)Math.Ceiling(size.Width) + 12;
+                int height = (int)Math.Ceiling(size.Height) + 6;
+                int x = rect.Left;
+                int y = rect.Top - height - 6;
+                if (y < 4)
+                {
+                    y = rect.Top + 6;
+                }
+
+                using (var background = new SolidBrush(Color.FromArgb(210, 18, 24, 36)))
+                using (var foreground = new SolidBrush(Color.White))
+                {
+                    g.FillRectangle(background, x, y, width, height);
+                    g.DrawString(text, font, foreground, x + 6, y + 3);
+                }
+            }
+        }
+
         private static Rectangle NormalizeRectangle(Point a, Point b)
         {
             return Rectangle.FromLTRB(Math.Min(a.X, b.X), Math.Min(a.Y, b.Y), Math.Max(a.X, b.X), Math.Max(a.Y, b.Y));
@@ -1077,6 +1124,7 @@ namespace PinShotWin
     internal sealed class PinWindow : Form
     {
         private readonly Bitmap image;
+        private readonly ContextMenuStrip pinMenu;
         private bool dragging;
         private Point dragOffset;
         private double scale = 1.0;
@@ -1092,10 +1140,18 @@ namespace PinShotWin
             DoubleBuffered = true;
             Cursor = Cursors.SizeAll;
             KeyPreview = true;
+
+            pinMenu = new ContextMenuStrip();
+            pinMenu.Items.Add("复制", null, delegate { CopyPinnedImage(); });
+            pinMenu.Items.Add("保存", null, delegate { SavePinnedImage(); });
+            pinMenu.Items.Add(new ToolStripSeparator());
+            pinMenu.Items.Add("关闭", null, delegate { Close(); });
+            ContextMenuStrip = pinMenu;
         }
 
         protected override void OnClosed(EventArgs e)
         {
+            pinMenu.Dispose();
             image.Dispose();
             base.OnClosed(e);
         }
@@ -1127,7 +1183,7 @@ namespace PinShotWin
         {
             if (keyData == (Keys.Control | Keys.C))
             {
-                Clipboard.SetImage((Bitmap)image.Clone());
+                CopyPinnedImage();
                 return true;
             }
 
@@ -1175,6 +1231,30 @@ namespace PinShotWin
             Size = new Size(newWidth, newHeight);
             Location = new Point(mouseScreen.X - (int)(newWidth * ratioX), mouseScreen.Y - (int)(newHeight * ratioY));
             Invalidate();
+        }
+
+        private void CopyPinnedImage()
+        {
+            Clipboard.SetImage((Bitmap)image.Clone());
+        }
+
+        private void SavePinnedImage()
+        {
+            using (var dialog = new SaveFileDialog())
+            {
+                dialog.Title = "保存贴图";
+                dialog.FileName = "pinshot_" + DateTime.Now.ToString("yyyyMMdd_HHmmss");
+                dialog.Filter = "JPG 图片 (*.jpg)|*.jpg|PNG 图片 (*.png)|*.png";
+                dialog.DefaultExt = "jpg";
+
+                if (dialog.ShowDialog(this) == DialogResult.OK)
+                {
+                    ImageSaveFormat format = Path.GetExtension(dialog.FileName).Equals(".png", StringComparison.OrdinalIgnoreCase)
+                        ? ImageSaveFormat.Png
+                        : ImageSaveFormat.Jpg;
+                    ImageFile.Save(image, dialog.FileName, format, 90);
+                }
+            }
         }
 
         private static Point ClampLocation(Point preferredLocation, Size imageSize)

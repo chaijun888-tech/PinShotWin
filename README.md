@@ -19,6 +19,9 @@ bin\PinShotWin.exe
 - Default screenshot hotkey: `F1`
 - Cancel capture: `Esc`
 - Copy current capture: `Ctrl+C`
+- Save current capture: `Ctrl+S`
+- Pin current capture: `Ctrl+P`
+- Copy current capture: `Enter`
 
 ## Features
 
@@ -30,7 +33,9 @@ bin\PinShotWin.exe
 - Window hover selection
 - Manual rectangle selection
 - Copy, save, pin, cancel toolbar
+- Adjustable preview selection with size display
 - Multiple pinned images
 - Drag pinned images
 - Mouse-wheel scale while pointer is over pinned image
 - Double-click pinned image to close
+- Right-click pinned image menu: copy, save, close
