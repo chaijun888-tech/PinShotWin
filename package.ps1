@@ -57,5 +57,21 @@ Remove-Item -LiteralPath $versionedZipPath -Force -ErrorAction SilentlyContinue
 Compress-Archive -LiteralPath $releaseDir -DestinationPath $zipPath -Force
 Copy-Item -LiteralPath $zipPath -Destination $versionedZipPath -Force
 
+$checksumTargets = @(
+    (Join-Path $releaseDir "PinShotWin.exe"),
+    $zipPath,
+    $versionedZipPath
+)
+
+$checksumLines = foreach ($target in $checksumTargets) {
+    $hash = Get-FileHash -Algorithm SHA256 -LiteralPath $target
+    "$($hash.Hash)  $([System.IO.Path]::GetFileName($target))"
+}
+
+Set-Content -LiteralPath (Join-Path $releaseDir "SHA256SUMS.txt") -Value $checksumLines -Encoding ASCII
+Set-Content -LiteralPath "$zipPath.sha256" -Value ((Get-FileHash -Algorithm SHA256 -LiteralPath $zipPath).Hash + "  " + [System.IO.Path]::GetFileName($zipPath)) -Encoding ASCII
+Set-Content -LiteralPath "$versionedZipPath.sha256" -Value ((Get-FileHash -Algorithm SHA256 -LiteralPath $versionedZipPath).Hash + "  " + [System.IO.Path]::GetFileName($versionedZipPath)) -Encoding ASCII
+
 Write-Host "Packaged $zipPath"
 Write-Host "Packaged $versionedZipPath"
+Write-Host "Wrote SHA256 checksums"

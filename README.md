@@ -34,6 +34,8 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 
 The installer copies `VERSION.txt` to `%LOCALAPPDATA%\PinShotWin`.
 
+Release packages include SHA256 checksum files for integrity checks.
+
 Uninstall:
 
 ```powershell

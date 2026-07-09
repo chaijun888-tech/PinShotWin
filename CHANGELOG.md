@@ -12,4 +12,5 @@
 - Added settings for hotkey, startup, save format, and JPG quality.
 - Added user install/uninstall scripts and release packaging.
 - Added installed version metadata via `VERSION.txt`.
+- Added SHA256 checksum generation for release packages.
 - Added app icon and release zip generation.
