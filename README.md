@@ -44,6 +44,12 @@ Release packages include SHA256 checksum files for integrity checks.
 
 The installer stops a running PinShotWin process before upgrading files.
 
+Single-file setup exe:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\make-installer.ps1
+```
+
 Uninstall:
 
 ```powershell
