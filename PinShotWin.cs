@@ -8,18 +8,31 @@ using System.Drawing.Imaging;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 using System.Windows.Forms;
 
 namespace PinShotWin
 {
     internal static class Program
     {
+        private const string SingleInstanceMutexName = @"Local\PinShotWin.SingleInstance";
+
         [STAThread]
         private static void Main()
         {
-            Application.EnableVisualStyles();
-            Application.SetCompatibleTextRenderingDefault(false);
-            Application.Run(new TrayContext());
+            bool createdNew;
+            using (var mutex = new Mutex(true, SingleInstanceMutexName, out createdNew))
+            {
+                if (!createdNew)
+                {
+                    return;
+                }
+
+                Application.EnableVisualStyles();
+                Application.SetCompatibleTextRenderingDefault(false);
+                Application.Run(new TrayContext());
+                GC.KeepAlive(mutex);
+            }
         }
     }
 
