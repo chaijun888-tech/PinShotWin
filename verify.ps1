@@ -1,3 +1,7 @@
+param(
+    [switch]$IncludeInstaller
+)
+
 $ErrorActionPreference = "Stop"
 
 $root = $PSScriptRoot
@@ -6,6 +10,7 @@ $releaseDir = Join-Path $root "release\PinShotWin"
 $exePath = Join-Path $releaseDir "PinShotWin.exe"
 $zipPath = Join-Path $root "release\PinShotWin.zip"
 $versionedZipPath = Join-Path $root "release\PinShotWin-$version.zip"
+$installerPath = Join-Path $root "release\PinShotWinSetup-$version.exe"
 
 function Assert-True {
     param(
@@ -66,5 +71,16 @@ $running | Stop-Process -Force
 
 Assert-True ($running.Count -eq 1) "Expected one running PinShotWin process, got $($running.Count)"
 Assert-True $secondExited "Second instance did not exit"
+
+if ($IncludeInstaller) {
+    Write-Host "Checking single-file setup installer..."
+    & (Join-Path $root "make-installer.ps1")
+    Assert-True (Test-Path -LiteralPath $installerPath) "Missing setup installer"
+    Assert-True (Test-Path -LiteralPath "$installerPath.sha256") "Missing setup installer checksum"
+
+    $installerRecordedHash = (Get-Content -LiteralPath "$installerPath.sha256").Split(" ")[0]
+    $installerActualHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $installerPath).Hash
+    Assert-True ($installerRecordedHash -eq $installerActualHash) "Setup installer checksum mismatch"
+}
 
 Write-Host "Verification passed for PinShotWin $version"

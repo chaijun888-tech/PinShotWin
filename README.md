@@ -22,6 +22,12 @@ bin\PinShotWin.exe
 powershell -ExecutionPolicy Bypass -File .\verify.ps1
 ```
 
+Verify release package and setup exe:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\verify.ps1 -IncludeInstaller
+```
+
 ## Release
 
 The release package can be used directly or installed for the current Windows user.

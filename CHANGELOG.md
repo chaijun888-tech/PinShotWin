@@ -14,6 +14,7 @@
 - Added user install/uninstall scripts and release packaging.
 - Installer now stops a running app before replacing the executable.
 - Added optional IExpress single-file setup exe generation.
+- Added optional setup exe verification via `verify.ps1 -IncludeInstaller`.
 - Added installed version metadata via `VERSION.txt`.
 - Added SHA256 checksum generation for release packages.
 - Added app icon and release zip generation.
