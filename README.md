@@ -14,6 +14,28 @@ Output:
 bin\PinShotWin.exe
 ```
 
+## Release
+
+The release package can be used directly or installed for the current Windows user.
+
+Direct run:
+
+```powershell
+.\PinShotWin.exe
+```
+
+Install:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+Uninstall:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\uninstall.ps1
+```
+
 ## Shortcuts
 
 - Default screenshot hotkey: `F1`
