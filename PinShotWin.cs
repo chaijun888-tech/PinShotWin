@@ -630,6 +630,13 @@ namespace PinShotWin
                 return;
             }
 
+            if (previewMode && IsArrowKey(e.KeyCode))
+            {
+                AdjustSelectionWithKeyboard(e.KeyCode, e.Control, e.Shift ? 10 : 1);
+                e.Handled = true;
+                return;
+            }
+
             base.OnKeyDown(e);
         }
 
@@ -959,6 +966,54 @@ namespace PinShotWin
             }
 
             return Rectangle.FromLTRB(left, top, right, bottom);
+        }
+
+        private void AdjustSelectionWithKeyboard(Keys keyCode, bool resize, int step)
+        {
+            Rectangle bounds = selectedBounds;
+            int dx = 0;
+            int dy = 0;
+
+            if (keyCode == Keys.Left) dx = -step;
+            else if (keyCode == Keys.Right) dx = step;
+            else if (keyCode == Keys.Up) dy = -step;
+            else if (keyCode == Keys.Down) dy = step;
+
+            if (resize)
+            {
+                bounds = ResizeSelectionByKeyboard(bounds, dx, dy);
+            }
+            else
+            {
+                bounds = MoveSelectionByKeyboard(bounds, dx, dy);
+            }
+
+            if (bounds != selectedBounds)
+            {
+                selectedBounds = bounds;
+                PositionToolbar();
+                Invalidate();
+            }
+        }
+
+        private Rectangle MoveSelectionByKeyboard(Rectangle bounds, int dx, int dy)
+        {
+            int x = Math.Max(0, Math.Min(ClientSize.Width - bounds.Width, bounds.X + dx));
+            int y = Math.Max(0, Math.Min(ClientSize.Height - bounds.Height, bounds.Y + dy));
+            return new Rectangle(x, y, bounds.Width, bounds.Height);
+        }
+
+        private Rectangle ResizeSelectionByKeyboard(Rectangle bounds, int dx, int dy)
+        {
+            const int minSize = 20;
+            int width = Math.Max(minSize, Math.Min(ClientSize.Width - bounds.Left, bounds.Width + dx));
+            int height = Math.Max(minSize, Math.Min(ClientSize.Height - bounds.Top, bounds.Height + dy));
+            return new Rectangle(bounds.Left, bounds.Top, width, height);
+        }
+
+        private static bool IsArrowKey(Keys keyCode)
+        {
+            return keyCode == Keys.Left || keyCode == Keys.Right || keyCode == Keys.Up || keyCode == Keys.Down;
         }
 
         private static Cursor CursorForMode(SelectionDragMode mode)

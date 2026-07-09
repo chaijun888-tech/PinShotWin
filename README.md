@@ -44,6 +44,9 @@ powershell -ExecutionPolicy Bypass -File .\uninstall.ps1
 - Save current capture: `Ctrl+S`
 - Pin current capture: `Ctrl+P`
 - Copy current capture: `Enter`
+- Nudge preview selection: arrow keys
+- Resize preview selection: `Ctrl` + arrow keys
+- Use 10px steps: hold `Shift`
 
 ## Features
 
@@ -57,6 +60,7 @@ powershell -ExecutionPolicy Bypass -File .\uninstall.ps1
 - Manual rectangle selection
 - Copy, save, pin, cancel toolbar
 - Adjustable preview selection with size display
+- Keyboard nudge and resize for preview selection
 - Multiple pinned images
 - Drag pinned images
 - Mouse-wheel scale while pointer is over pinned image

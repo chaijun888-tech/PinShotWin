@@ -36,9 +36,10 @@ Usage:
 1. Drag to select, then adjust the blue frame or handles.
 2. Toolbar actions: copy, save, pin, cancel.
 3. Preview shortcuts: Enter/Ctrl+C copy, Ctrl+S save, Ctrl+P pin.
-4. Pinned images support right-click: copy, save, lock position, opacity, close.
-5. Tray menu supports settings, recent screenshots, and exit.
-6. Recent screenshots are in-memory only, keep latest 10, and clear on exit.
+4. Preview selection: arrow keys nudge, Ctrl+arrow resizes, Shift uses 10px steps.
+5. Pinned images support right-click: copy, save, lock position, opacity, close.
+6. Tray menu supports settings, recent screenshots, and exit.
+7. Recent screenshots are in-memory only, keep latest 10, and clear on exit.
 
 If Windows shows an unknown publisher warning, choose "More info" and continue.
 '@
