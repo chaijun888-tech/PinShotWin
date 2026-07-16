@@ -18,8 +18,24 @@ namespace PinShotWin
         private const string SingleInstanceMutexName = @"Local\PinShotWin.SingleInstance";
 
         [STAThread]
-        private static void Main()
+        private static void Main(string[] args)
         {
+            if (args.Length >= 2 && string.Equals(args[0], "--self-test-ui", StringComparison.OrdinalIgnoreCase))
+            {
+                Application.EnableVisualStyles();
+                Application.SetCompatibleTextRenderingDefault(false);
+                SelfTestUi.Run(args[1]);
+                return;
+            }
+
+            if (args.Length >= 2 && string.Equals(args[0], "--self-test-drag", StringComparison.OrdinalIgnoreCase))
+            {
+                Application.EnableVisualStyles();
+                Application.SetCompatibleTextRenderingDefault(false);
+                CaptureOverlay.RunDragPerformanceTest(args[1]);
+                return;
+            }
+
             bool createdNew;
             using (var mutex = new Mutex(true, SingleInstanceMutexName, out createdNew))
             {
@@ -185,6 +201,186 @@ namespace PinShotWin
         public BitmapEventArgs(Bitmap bitmap)
         {
             Bitmap = bitmap;
+        }
+    }
+
+    internal sealed class WaitCursor : IDisposable
+    {
+        private readonly Cursor previous;
+
+        public WaitCursor()
+        {
+            previous = Cursor.Current;
+            Cursor.Current = Cursors.WaitCursor;
+        }
+
+        public void Dispose()
+        {
+            Cursor.Current = previous;
+        }
+    }
+
+    internal static class SelfTestUi
+    {
+        public static void Run(string outputDir)
+        {
+            Directory.CreateDirectory(outputDir);
+
+            using (var source = CreateSourceImage())
+            {
+                var annotations = new List<Annotation>
+                {
+                    new Annotation { Kind = AnnotationKind.Rectangle, Bounds = new Rectangle(20, 20, 70, 45) },
+                    new Annotation { Kind = AnnotationKind.Arrow, Start = new Point(10, 110), End = new Point(140, 30) },
+                    new Annotation { Kind = AnnotationKind.Text, Bounds = new Rectangle(18, 130, 120, 28), Text = "TEXT" },
+                    new Annotation { Kind = AnnotationKind.Mosaic, Bounds = new Rectangle(95, 95, 50, 40) }
+                };
+
+                using (var rendered = AnnotationRenderer.Render(source, annotations))
+                {
+                    rendered.Save(Path.Combine(outputDir, "annotation.png"), ImageFormat.Png);
+                    WriteResult(outputDir, "annotation_size.txt", rendered.Width + "x" + rendered.Height);
+                    WriteResult(outputDir, "annotation_probe.txt", PixelSummary(rendered, new Rectangle(95, 95, 50, 40)));
+                }
+            }
+
+            using (var canvas = CreateScrollingCanvas(240, 660))
+            using (var a = CreateScrollingFrame(canvas, 0))
+            using (var b = CreateScrollingFrame(canvas, 180))
+            using (var c = CreateScrollingFrame(canvas, 360))
+            {
+                var frames = new List<Bitmap> { a, b, c };
+                using (var stitched = ScrollingCapture.StitchForTest(frames))
+                {
+                    stitched.Save(Path.Combine(outputDir, "scroll.png"), ImageFormat.Png);
+                    WriteResult(outputDir, "scroll_size.txt", stitched.Width + "x" + stitched.Height);
+                }
+            }
+
+            using (var source = new Bitmap(100, 80, PixelFormat.Format32bppArgb))
+            using (var g = Graphics.FromImage(source))
+            {
+                g.Clear(Color.White);
+                var ordered = new List<Annotation>
+                {
+                    new Annotation { Kind = AnnotationKind.Rectangle, Bounds = new Rectangle(10, 10, 80, 60) },
+                    new Annotation { Kind = AnnotationKind.Mosaic, Bounds = new Rectangle(5, 5, 90, 70) }
+                };
+                using (var rendered = AnnotationRenderer.Render(source, ordered))
+                {
+                    rendered.Save(Path.Combine(outputDir, "annotation-order.png"), ImageFormat.Png);
+                    WriteResult(outputDir, "annotation-order-red.txt", CountRedPixels(rendered).ToString());
+                }
+            }
+
+            using (var desktop = new Bitmap(80, 40, PixelFormat.Format32bppArgb))
+            using (var g = Graphics.FromImage(desktop))
+            {
+                g.Clear(Color.Red);
+                g.FillRectangle(Brushes.Lime, 40, 0, 40, 40);
+                using (var movedSelection = desktop.Clone(new Rectangle(40, 0, 40, 40), PixelFormat.Format32bppArgb))
+                {
+                    movedSelection.Save(Path.Combine(outputDir, "moved-selection.png"), ImageFormat.Png);
+                }
+            }
+
+            WriteResult(outputDir, "text-escape.txt", CaptureOverlay.RunTextEscapeTest() ? "pass" : "fail");
+        }
+
+        private static Bitmap CreateSourceImage()
+        {
+            var bitmap = new Bitmap(180, 180, PixelFormat.Format32bppArgb);
+            using (var g = Graphics.FromImage(bitmap))
+            {
+                g.Clear(Color.White);
+                for (int y = 0; y < bitmap.Height; y += 10)
+                {
+                    using (var brush = new SolidBrush(y % 20 == 0 ? Color.FromArgb(220, 234, 255) : Color.FromArgb(236, 246, 232)))
+                    {
+                        g.FillRectangle(brush, 0, y, bitmap.Width, 10);
+                    }
+                }
+                using (var pen = new Pen(Color.FromArgb(40, 40, 40), 1))
+                {
+                    g.DrawRectangle(pen, 0, 0, bitmap.Width - 1, bitmap.Height - 1);
+                }
+                using (var font = new Font("Segoe UI", 11F, FontStyle.Regular, GraphicsUnit.Pixel))
+                using (var brush = new SolidBrush(Color.FromArgb(35, 35, 35)))
+                {
+                    g.DrawString("SECRET TEXT", font, brush, 96, 104);
+                }
+            }
+            return bitmap;
+        }
+
+        private static Bitmap CreateScrollingCanvas(int width, int height)
+        {
+            var bitmap = new Bitmap(width, height, PixelFormat.Format32bppArgb);
+            using (var g = Graphics.FromImage(bitmap))
+            {
+                g.Clear(Color.White);
+                for (int y = 0; y < height; y += 12)
+                {
+                    using (var brush = new SolidBrush(Color.FromArgb((y * 7) % 240, (y * 13) % 240, (y * 17) % 240)))
+                    {
+                        g.FillRectangle(brush, 0, y, width, 12);
+                    }
+                }
+            }
+            return bitmap;
+        }
+
+        private static Bitmap CreateScrollingFrame(Bitmap canvas, int offset)
+        {
+            var frame = new Bitmap(300, 300, PixelFormat.Format32bppArgb);
+            using (var g = Graphics.FromImage(frame))
+            {
+                g.Clear(Color.FromArgb(235, 239, 247));
+                using (var fixedBrush = new SolidBrush(Color.FromArgb(205, 215, 230)))
+                {
+                    g.FillRectangle(fixedBrush, 0, 0, 60, frame.Height);
+                }
+                g.DrawImage(canvas, new Rectangle(60, 0, 240, 300), new Rectangle(0, offset, 240, 300), GraphicsUnit.Pixel);
+            }
+            return frame;
+        }
+
+        private static int CountRedPixels(Bitmap bitmap)
+        {
+            int count = 0;
+            for (int y = 0; y < bitmap.Height; y++)
+            {
+                for (int x = 0; x < bitmap.Width; x++)
+                {
+                    Color color = bitmap.GetPixel(x, y);
+                    if (color.R > 180 && color.G < 100 && color.B < 100)
+                    {
+                        count++;
+                    }
+                }
+            }
+            return count;
+        }
+
+        private static string PixelSummary(Bitmap bitmap, Rectangle rect)
+        {
+            long total = 0;
+            int count = 0;
+            for (int y = rect.Top; y < rect.Bottom; y += 5)
+            {
+                for (int x = rect.Left; x < rect.Right; x += 5)
+                {
+                    Color c = bitmap.GetPixel(x, y);
+                    total += c.R + c.G + c.B;
+                    count++;
+                }
+            }
+            return count == 0 ? "0" : (total / count).ToString();
+        }
+
+        private static void WriteResult(string outputDir, string fileName, string text)
+        {
+            File.WriteAllText(Path.Combine(outputDir, fileName), text, Encoding.UTF8);
         }
     }
 
@@ -583,7 +779,7 @@ namespace PinShotWin
         }
     }
 
-    internal sealed class CaptureOverlay : Form
+    internal sealed class CaptureOverlay : Form, IMessageFilter
     {
         public static bool IsOpen;
         public event EventHandler<BitmapEventArgs> CaptureCompleted;
@@ -601,6 +797,14 @@ namespace PinShotWin
         private SelectionDragMode previewDragMode = SelectionDragMode.None;
         private Rectangle previewDragStartBounds;
         private Point previewDragStartPoint;
+        private readonly List<Annotation> annotations = new List<Annotation>();
+        private AnnotationTool activeTool = AnnotationTool.None;
+        private bool annotationDragging;
+        private Point annotationStart;
+        private Point annotationCurrent;
+        private TextBox textEditor;
+        private Point textEditorImageStart;
+        private Bitmap previewBitmap;
 
         public CaptureOverlay(AppSettings settings)
         {
@@ -624,8 +828,66 @@ namespace PinShotWin
             toolbar.CopyClicked += delegate { CopySelection(); };
             toolbar.SaveClicked += delegate { SaveSelection(); };
             toolbar.PinClicked += delegate { PinSelection(); };
+            toolbar.RectClicked += delegate { SetActiveTool(AnnotationTool.Rectangle); };
+            toolbar.ArrowClicked += delegate { SetActiveTool(AnnotationTool.Arrow); };
+            toolbar.TextClicked += delegate { SetActiveTool(AnnotationTool.Text); };
+            toolbar.MosaicClicked += delegate { SetActiveTool(AnnotationTool.Mosaic); };
+            toolbar.UndoClicked += delegate { UndoAnnotation(); };
+            toolbar.ScrollClicked += delegate { StartScrollingCapture(); };
             toolbar.CancelClicked += delegate { Close(); };
             Controls.Add(toolbar);
+        }
+
+        public static void RunDragPerformanceTest(string outputPath)
+        {
+            using (var overlay = new CaptureOverlay(new AppSettings()))
+            {
+                overlay.Show();
+                Application.DoEvents();
+                overlay.selectedBounds = new Rectangle(300, 220, 750, 500);
+                overlay.EnterPreview();
+                overlay.previewDragMode = SelectionDragMode.Move;
+                overlay.previewDragStartPoint = new Point(650, 450);
+                overlay.previewDragStartBounds = overlay.selectedBounds;
+
+                var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+                for (int i = 1; i <= 90; i++)
+                {
+                    var location = new Point(650 + 300 * i / 90, 450);
+                    overlay.OnMouseMove(new MouseEventArgs(MouseButtons.Left, 0, location.X, location.Y, 0));
+                    overlay.Update();
+                }
+                stopwatch.Stop();
+
+                double fps = 90000.0 / Math.Max(1, stopwatch.ElapsedMilliseconds);
+                int finalSelectionX = overlay.GetSelectionXForTest();
+                File.WriteAllText(outputPath,
+                    "elapsed_ms=" + stopwatch.ElapsedMilliseconds + Environment.NewLine +
+                    "fps=" + fps.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + Environment.NewLine +
+                    "selection_x=" + finalSelectionX,
+                    Encoding.UTF8);
+            }
+        }
+
+        private int GetSelectionXForTest()
+        {
+            return selectedBounds.X;
+        }
+
+        public static bool RunTextEscapeTest()
+        {
+            using (var overlay = new CaptureOverlay(new AppSettings()))
+            {
+                overlay.Show();
+                Application.DoEvents();
+                overlay.selectedBounds = new Rectangle(300, 220, 750, 500);
+                overlay.EnterPreview();
+                overlay.ShowTextEditor(new Point(420, 360));
+
+                var message = Message.Create(overlay.Handle, 0x0100, (IntPtr)(int)Keys.Escape, IntPtr.Zero);
+                bool handled = overlay.PreFilterMessage(ref message);
+                return handled && overlay.textEditor == null && !overlay.IsDisposed;
+            }
         }
 
         protected override void OnShown(EventArgs e)
@@ -636,6 +898,11 @@ namespace PinShotWin
 
         protected override void OnClosed(EventArgs e)
         {
+            Application.RemoveMessageFilter(this);
+            if (previewBitmap != null)
+            {
+                previewBitmap.Dispose();
+            }
             dimmedDesktopBitmap.Dispose();
             desktopBitmap.Dispose();
             IsOpen = false;
@@ -646,6 +913,14 @@ namespace PinShotWin
         {
             if (e.KeyCode == Keys.Escape)
             {
+                if (textEditor != null)
+                {
+                    CancelTextEditor();
+                    e.Handled = true;
+                    e.SuppressKeyPress = true;
+                    return;
+                }
+
                 Close();
                 return;
             }
@@ -671,6 +946,13 @@ namespace PinShotWin
                 return;
             }
 
+            if (previewMode && e.Control && e.KeyCode == Keys.Z)
+            {
+                UndoAnnotation();
+                e.Handled = true;
+                return;
+            }
+
             if (previewMode && e.KeyCode == Keys.Enter)
             {
                 CopySelection();
@@ -688,18 +970,37 @@ namespace PinShotWin
             base.OnKeyDown(e);
         }
 
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            if (textEditor != null && keyData == Keys.Escape)
+            {
+                CancelTextEditor();
+                return true;
+            }
+
+            return base.ProcessCmdKey(ref msg, keyData);
+        }
+
         protected override void OnMouseDown(MouseEventArgs e)
         {
             if (previewMode)
             {
                 if (e.Button == MouseButtons.Left && !toolbar.Bounds.Contains(e.Location))
                 {
-                    previewDragMode = HitTestSelection(e.Location);
-                    if (previewDragMode != SelectionDragMode.None)
+                    if (activeTool != AnnotationTool.None && selectedBounds.Contains(e.Location))
                     {
-                        previewDragStartPoint = e.Location;
-                        previewDragStartBounds = selectedBounds;
-                        Capture = true;
+                        BeginAnnotation(e.Location);
+                        return;
+                    }
+                    else
+                    {
+                        previewDragMode = HitTestSelection(e.Location);
+                        if (previewDragMode != SelectionDragMode.None)
+                        {
+                            previewDragStartPoint = e.Location;
+                            previewDragStartBounds = selectedBounds;
+                            Capture = true;
+                        }
                     }
                 }
 
@@ -724,11 +1025,18 @@ namespace PinShotWin
         {
             if (previewMode)
             {
-                if (previewDragMode != SelectionDragMode.None)
+                if (annotationDragging)
                 {
+                    annotationCurrent = ToImagePoint(e.Location);
+                    Invalidate();
+                }
+                else if (previewDragMode != SelectionDragMode.None)
+                {
+                    var oldBounds = selectedBounds;
+                    var oldToolbarBounds = toolbar.Bounds;
                     selectedBounds = BuildAdjustedBounds(previewDragStartBounds, previewDragStartPoint, e.Location, previewDragMode);
                     PositionToolbar();
-                    Invalidate();
+                    InvalidateSelectionChange(oldBounds, selectedBounds, oldToolbarBounds, toolbar.Bounds);
                 }
                 else
                 {
@@ -758,9 +1066,16 @@ namespace PinShotWin
             {
                 if (e.Button == MouseButtons.Left)
                 {
-                    previewDragMode = SelectionDragMode.None;
-                    Capture = false;
-                    Cursor = CursorForMode(HitTestSelection(e.Location));
+                    if (annotationDragging)
+                    {
+                        CompleteAnnotation(e.Location);
+                    }
+                    else
+                    {
+                        previewDragMode = SelectionDragMode.None;
+                        Capture = false;
+                        Cursor = CursorForMode(HitTestSelection(e.Location));
+                    }
                 }
 
                 base.OnMouseUp(e);
@@ -797,14 +1112,31 @@ namespace PinShotWin
         protected override void OnPaint(PaintEventArgs e)
         {
             var g = e.Graphics;
-            g.DrawImage(dimmedDesktopBitmap, ClientRectangle);
+            var clip = Rectangle.Intersect(e.ClipRectangle, ClientRectangle);
+            if (clip.Width <= 0 || clip.Height <= 0)
+            {
+                return;
+            }
+
+            g.DrawImage(dimmedDesktopBitmap, clip, clip, GraphicsUnit.Pixel);
 
             var rect = previewMode ? selectedBounds : (dragging ? selectedBounds : TranslateScreenToClient(hoverBounds));
             if (rect.Width > 0 && rect.Height > 0)
             {
-                g.SetClip(rect);
-                g.DrawImage(desktopBitmap, ClientRectangle);
-                g.ResetClip();
+                var contentClip = Rectangle.Intersect(rect, clip);
+                if (previewMode && previewBitmap != null)
+                {
+                    if (contentClip.Width > 0 && contentClip.Height > 0)
+                    {
+                        var source = MapDestinationToSource(contentClip, rect, previewBitmap.Size);
+                        g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                        g.DrawImage(previewBitmap, contentClip, source, GraphicsUnit.Pixel);
+                    }
+                }
+                else if (contentClip.Width > 0 && contentClip.Height > 0)
+                {
+                    g.DrawImage(desktopBitmap, contentClip, contentClip, GraphicsUnit.Pixel);
+                }
 
                 using (var pen = new Pen(Color.FromArgb(18, 132, 255), 2))
                 {
@@ -813,15 +1145,89 @@ namespace PinShotWin
 
                 if (previewMode)
                 {
+                    var state = g.Save();
+                    g.SetClip(clip, CombineMode.Intersect);
+                    var previewSource = previewBitmap ?? desktopBitmap;
+                    var previewSourceOrigin = previewBitmap == null ? selectedBounds.Location : Point.Empty;
+                    AnnotationRenderer.DrawPreview(g, previewSource, annotations, rect, PreviewImageSize, previewSourceOrigin);
+                    if (annotationDragging)
+                    {
+                        var preview = BuildAnnotation(activeTool, annotationStart, annotationCurrent, null);
+                        if (preview != null)
+                        {
+                            AnnotationRenderer.DrawPreview(g, previewSource, preview, rect, PreviewImageSize, previewSourceOrigin);
+                        }
+                    }
+                    g.Restore(state);
                     DrawSelectionHandles(g, rect);
                     DrawSelectionSize(g, rect);
                 }
             }
         }
 
+        private void InvalidateSelectionChange(Rectangle oldBounds, Rectangle newBounds, Rectangle oldToolbarBounds, Rectangle newToolbarBounds)
+        {
+            using (var dirty = new Region(oldBounds))
+            {
+                if (previewBitmap == null && annotations.Count == 0)
+                {
+                    dirty.Xor(newBounds);
+                }
+                else
+                {
+                    dirty.Union(newBounds);
+                }
+
+                AddSelectionFrame(dirty, oldBounds);
+                AddSelectionFrame(dirty, newBounds);
+                dirty.Union(GetSelectionSizeBounds(oldBounds));
+                dirty.Union(GetSelectionSizeBounds(newBounds));
+                dirty.Union(oldToolbarBounds);
+                dirty.Union(newToolbarBounds);
+                Invalidate(dirty);
+            }
+        }
+
+        private static void AddSelectionFrame(Region dirty, Rectangle bounds)
+        {
+            var outer = bounds;
+            outer.Inflate(10, 10);
+            var inner = bounds;
+            inner.Inflate(-10, -10);
+            using (var frame = new Region(outer))
+            {
+                if (inner.Width > 0 && inner.Height > 0)
+                {
+                    frame.Exclude(inner);
+                }
+                dirty.Union(frame);
+            }
+        }
+
+        private static Rectangle GetSelectionSizeBounds(Rectangle bounds)
+        {
+            return new Rectangle(bounds.Left - 2, Math.Max(0, bounds.Top - 40), 120, 72);
+        }
+
+        private static Rectangle MapDestinationToSource(Rectangle destinationClip, Rectangle destinationBounds, Size sourceSize)
+        {
+            double scaleX = sourceSize.Width / (double)Math.Max(1, destinationBounds.Width);
+            double scaleY = sourceSize.Height / (double)Math.Max(1, destinationBounds.Height);
+            int left = (int)Math.Floor((destinationClip.Left - destinationBounds.Left) * scaleX);
+            int top = (int)Math.Floor((destinationClip.Top - destinationBounds.Top) * scaleY);
+            int right = (int)Math.Ceiling((destinationClip.Right - destinationBounds.Left) * scaleX);
+            int bottom = (int)Math.Ceiling((destinationClip.Bottom - destinationBounds.Top) * scaleY);
+            return Rectangle.FromLTRB(
+                Math.Max(0, left),
+                Math.Max(0, top),
+                Math.Min(sourceSize.Width, right),
+                Math.Min(sourceSize.Height, bottom));
+        }
+
         private void EnterPreview()
         {
             selectedBounds = ClampToClient(selectedBounds);
+            SetPreviewBitmap(null);
             previewMode = true;
             Cursor = Cursors.Default;
             PositionToolbar();
@@ -855,9 +1261,328 @@ namespace PinShotWin
             return desktopBitmap.Clone(selectedBounds, PixelFormat.Format32bppArgb);
         }
 
+        private void SetPreviewBitmap(Bitmap bitmap)
+        {
+            if (previewBitmap != null)
+            {
+                previewBitmap.Dispose();
+            }
+
+            previewBitmap = bitmap;
+        }
+
+        private Bitmap CreateFinalBitmap()
+        {
+            using (var bitmap = CreateCurrentBitmap())
+            {
+                if (bitmap == null)
+                {
+                    return null;
+                }
+
+                return AnnotationRenderer.Render(bitmap, annotations);
+            }
+        }
+
+        private Bitmap CreateCurrentBitmap()
+        {
+            if (previewBitmap != null)
+            {
+                return (Bitmap)previewBitmap.Clone();
+            }
+
+            return CreateSelectionBitmap();
+        }
+
+        private void SetActiveTool(AnnotationTool tool)
+        {
+            CommitTextEditor();
+            activeTool = activeTool == tool ? AnnotationTool.None : tool;
+            toolbar.SetActiveTool(activeTool);
+            Cursor = activeTool == AnnotationTool.None ? Cursors.Default : Cursors.Cross;
+            Invalidate();
+        }
+
+        private void UndoAnnotation()
+        {
+            CommitTextEditor();
+            if (annotations.Count == 0)
+            {
+                return;
+            }
+
+            annotations.RemoveAt(annotations.Count - 1);
+            Invalidate();
+        }
+
+        private void StartScrollingCapture()
+        {
+            CommitTextEditor();
+            if (!previewMode || selectedBounds.Width < 10 || selectedBounds.Height < 10)
+            {
+                return;
+            }
+
+            using (var wait = new WaitCursor())
+            {
+                var screenBounds = new Rectangle(
+                    virtualBounds.X + selectedBounds.X,
+                    virtualBounds.Y + selectedBounds.Y,
+                    selectedBounds.Width,
+                    selectedBounds.Height);
+
+                toolbar.Visible = false;
+                Hide();
+                Application.DoEvents();
+                Thread.Sleep(180);
+
+                Bitmap stitched = null;
+                try
+                {
+                    stitched = ScrollingCapture.Capture(screenBounds, 30);
+                }
+                finally
+                {
+                    Show();
+                    Activate();
+                    toolbar.Visible = true;
+                }
+
+                if (stitched != null)
+                {
+                    annotations.Clear();
+                    SetPreviewBitmap(stitched);
+                    Invalidate();
+                }
+            }
+        }
+
+        private void BeginAnnotation(Point clientPoint)
+        {
+            annotationStart = ToImagePoint(clientPoint);
+            annotationCurrent = annotationStart;
+
+            if (activeTool == AnnotationTool.Text)
+            {
+                ShowTextEditor(clientPoint);
+                return;
+            }
+
+            annotationDragging = true;
+            Capture = true;
+        }
+
+        private void CompleteAnnotation(Point clientPoint)
+        {
+            annotationCurrent = ToImagePoint(clientPoint);
+            annotationDragging = false;
+            Capture = false;
+
+            var annotation = BuildAnnotation(activeTool, annotationStart, annotationCurrent, null);
+            if (annotation != null)
+            {
+                annotations.Add(annotation);
+            }
+
+            Invalidate();
+        }
+
+        private Annotation BuildAnnotation(AnnotationTool tool, Point start, Point end, string text)
+        {
+            if (tool == AnnotationTool.Rectangle || tool == AnnotationTool.Mosaic)
+            {
+                var bounds = NormalizeRectangle(start, end);
+                if (bounds.Width < 4 || bounds.Height < 4)
+                {
+                    return null;
+                }
+
+                return new Annotation
+                {
+                    Kind = tool == AnnotationTool.Rectangle ? AnnotationKind.Rectangle : AnnotationKind.Mosaic,
+                    Bounds = bounds
+                };
+            }
+
+            if (tool == AnnotationTool.Arrow)
+            {
+                if (Distance(start, end) < 6)
+                {
+                    return null;
+                }
+
+                return new Annotation
+                {
+                    Kind = AnnotationKind.Arrow,
+                    Start = start,
+                    End = end
+                };
+            }
+
+            if (tool == AnnotationTool.Text)
+            {
+                if (string.IsNullOrWhiteSpace(text))
+                {
+                    return null;
+                }
+
+                return new Annotation
+                {
+                    Kind = AnnotationKind.Text,
+                    Bounds = new Rectangle(start.X, start.Y, Math.Max(80, end.X - start.X), Math.Max(26, end.Y - start.Y)),
+                    Text = text.Trim()
+                };
+            }
+
+            return null;
+        }
+
+        private void ShowTextEditor(Point clientPoint)
+        {
+            CommitTextEditor();
+            var imagePoint = ToImagePoint(clientPoint);
+            textEditorImageStart = imagePoint;
+            var editorLocation = ImagePointToClient(imagePoint);
+            int width = Math.Min(240, Math.Max(120, selectedBounds.Right - editorLocation.X - 8));
+            if (width < 80)
+            {
+                editorLocation.X = Math.Max(selectedBounds.Left + 8, selectedBounds.Right - 248);
+                width = Math.Min(240, selectedBounds.Right - editorLocation.X - 8);
+                textEditorImageStart = ToImagePoint(editorLocation);
+            }
+
+            textEditor = new TextBox
+            {
+                BorderStyle = BorderStyle.FixedSingle,
+                Font = new Font("Segoe UI", 11F, FontStyle.Regular),
+                Location = editorLocation,
+                Width = Math.Max(80, width),
+                Height = 26
+            };
+            textEditor.KeyDown += TextEditorKeyDown;
+            textEditor.Leave += delegate { CommitTextEditor(); };
+            Controls.Add(textEditor);
+            Application.AddMessageFilter(this);
+            textEditor.BringToFront();
+            textEditor.Focus();
+        }
+
+        public bool PreFilterMessage(ref Message m)
+        {
+            const int WmKeyDown = 0x0100;
+            if (textEditor != null && m.Msg == WmKeyDown && (Keys)m.WParam.ToInt32() == Keys.Escape)
+            {
+                CancelTextEditor();
+                return true;
+            }
+
+            return false;
+        }
+
+        private void TextEditorKeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.KeyCode == Keys.Enter)
+            {
+                CommitTextEditor();
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+            }
+            else if (e.KeyCode == Keys.Escape)
+            {
+                CancelTextEditor();
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+            }
+        }
+
+        private void CommitTextEditor()
+        {
+            if (textEditor == null)
+            {
+                return;
+            }
+
+            var editor = textEditor;
+            textEditor = null;
+            Application.RemoveMessageFilter(this);
+            editor.KeyDown -= TextEditorKeyDown;
+            var start = textEditorImageStart;
+            var end = ToImagePoint(new Point(editor.Right, editor.Bottom));
+            var annotation = BuildAnnotation(AnnotationTool.Text, ClampImagePoint(start), ClampImagePoint(end), editor.Text);
+            Controls.Remove(editor);
+            editor.Dispose();
+
+            if (annotation != null)
+            {
+                annotations.Add(annotation);
+                Invalidate();
+            }
+        }
+
+        private void CancelTextEditor()
+        {
+            if (textEditor == null)
+            {
+                return;
+            }
+
+            var editor = textEditor;
+            textEditor = null;
+            Application.RemoveMessageFilter(this);
+            editor.KeyDown -= TextEditorKeyDown;
+            Controls.Remove(editor);
+            editor.Dispose();
+            Invalidate();
+        }
+
+        private Point ToImagePoint(Point clientPoint)
+        {
+            var size = PreviewImageSize;
+            int x = (int)Math.Round((clientPoint.X - selectedBounds.Left) * (size.Width / (double)Math.Max(1, selectedBounds.Width)));
+            int y = (int)Math.Round((clientPoint.Y - selectedBounds.Top) * (size.Height / (double)Math.Max(1, selectedBounds.Height)));
+            return ClampImagePoint(new Point(x, y));
+        }
+
+        private Point ImagePointToClient(Point imagePoint)
+        {
+            var size = PreviewImageSize;
+            int x = selectedBounds.Left + (int)Math.Round(imagePoint.X * (selectedBounds.Width / (double)Math.Max(1, size.Width)));
+            int y = selectedBounds.Top + (int)Math.Round(imagePoint.Y * (selectedBounds.Height / (double)Math.Max(1, size.Height)));
+            return new Point(x, y);
+        }
+
+        private Point ClampImagePoint(Point imagePoint)
+        {
+            var size = PreviewImageSize;
+            int x = Math.Max(0, Math.Min(Math.Max(0, size.Width), imagePoint.X));
+            int y = Math.Max(0, Math.Min(Math.Max(0, size.Height), imagePoint.Y));
+            return new Point(x, y);
+        }
+
+        private Size PreviewImageSize
+        {
+            get
+            {
+                if (previewBitmap != null)
+                {
+                    return previewBitmap.Size;
+                }
+
+                return selectedBounds.Size;
+            }
+        }
+
+        private static double Distance(Point a, Point b)
+        {
+            int dx = a.X - b.X;
+            int dy = a.Y - b.Y;
+            return Math.Sqrt(dx * dx + dy * dy);
+        }
+
         private void CopySelection()
         {
-            using (var bitmap = CreateSelectionBitmap())
+            CommitTextEditor();
+            using (var bitmap = CreateFinalBitmap())
             {
                 if (bitmap == null)
                 {
@@ -892,7 +1617,8 @@ namespace PinShotWin
                     ImageSaveFormat format = Path.GetExtension(dialog.FileName).Equals(".png", StringComparison.OrdinalIgnoreCase)
                         ? ImageSaveFormat.Png
                         : ImageSaveFormat.Jpg;
-                    using (var bitmap = CreateSelectionBitmap())
+                    CommitTextEditor();
+                    using (var bitmap = CreateFinalBitmap())
                     {
                         if (bitmap == null)
                         {
@@ -909,7 +1635,8 @@ namespace PinShotWin
 
         private void PinSelection()
         {
-            using (var bitmap = CreateSelectionBitmap())
+            CommitTextEditor();
+            using (var bitmap = CreateFinalBitmap())
             {
                 if (bitmap == null)
                 {
@@ -1145,20 +1872,237 @@ namespace PinShotWin
         BottomRight
     }
 
+    internal enum AnnotationTool
+    {
+        None,
+        Rectangle,
+        Arrow,
+        Text,
+        Mosaic
+    }
+
+    internal enum AnnotationKind
+    {
+        Rectangle,
+        Arrow,
+        Text,
+        Mosaic
+    }
+
+    internal sealed class Annotation
+    {
+        public AnnotationKind Kind;
+        public Rectangle Bounds;
+        public Point Start;
+        public Point End;
+        public string Text;
+    }
+
+    internal static class AnnotationRenderer
+    {
+        private static readonly Color Red = Color.FromArgb(235, 38, 38);
+        private const int MosaicBlockSize = 10;
+
+        public static Bitmap Render(Bitmap source, IList<Annotation> annotations)
+        {
+            var output = new Bitmap(source.Width, source.Height, PixelFormat.Format32bppArgb);
+            using (var g = Graphics.FromImage(output))
+            {
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+                g.DrawImage(source, 0, 0, source.Width, source.Height);
+            }
+
+            foreach (var annotation in annotations)
+            {
+                if (annotation.Kind == AnnotationKind.Mosaic)
+                {
+                    ApplyMosaic(output, annotation.Bounds, MosaicBlockSize);
+                }
+                else
+                {
+                    using (var g = Graphics.FromImage(output))
+                    {
+                        g.SmoothingMode = SmoothingMode.AntiAlias;
+                        g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+                        Draw(g, annotation, new Rectangle(0, 0, output.Width, output.Height), output.Size);
+                    }
+                }
+            }
+
+            return output;
+        }
+
+        public static void Draw(Graphics g, IList<Annotation> annotations, Rectangle targetRect, Size imageSize)
+        {
+            foreach (var annotation in annotations)
+            {
+                Draw(g, annotation, targetRect, imageSize);
+            }
+        }
+
+        public static void DrawPreview(Graphics g, Bitmap source, IList<Annotation> annotations, Rectangle targetRect, Size imageSize, Point sourceOrigin)
+        {
+            foreach (var annotation in annotations)
+            {
+                DrawPreview(g, source, annotation, targetRect, imageSize, sourceOrigin);
+            }
+        }
+
+        public static void DrawPreview(Graphics g, Bitmap source, Annotation annotation, Rectangle targetRect, Size imageSize, Point sourceOrigin)
+        {
+            if (annotation.Kind == AnnotationKind.Mosaic && source != null)
+            {
+                DrawMosaicPreview(g, source, annotation.Bounds, targetRect, imageSize, sourceOrigin);
+                return;
+            }
+
+            Draw(g, annotation, targetRect, imageSize);
+        }
+
+        public static void Draw(Graphics g, Annotation annotation, Rectangle targetRect, Size imageSize)
+        {
+            if (imageSize.Width <= 0 || imageSize.Height <= 0)
+            {
+                return;
+            }
+
+            if (annotation.Kind == AnnotationKind.Rectangle)
+            {
+                using (var pen = new Pen(Red, 2.3F))
+                {
+                    pen.LineJoin = LineJoin.Round;
+                    g.DrawRectangle(pen, MapRect(annotation.Bounds, targetRect, imageSize));
+                }
+            }
+            else if (annotation.Kind == AnnotationKind.Arrow)
+            {
+                using (var pen = new Pen(Red, 2.5F))
+                {
+                    pen.StartCap = LineCap.Round;
+                    pen.EndCap = LineCap.ArrowAnchor;
+                    g.DrawLine(pen, MapPoint(annotation.Start, targetRect, imageSize), MapPoint(annotation.End, targetRect, imageSize));
+                }
+            }
+            else if (annotation.Kind == AnnotationKind.Text)
+            {
+                var rect = MapRect(annotation.Bounds, targetRect, imageSize);
+                using (var font = new Font("Segoe UI", 16F, FontStyle.Bold, GraphicsUnit.Pixel))
+                using (var brush = new SolidBrush(Red))
+                {
+                    g.DrawString(annotation.Text ?? string.Empty, font, brush, rect);
+                }
+            }
+        }
+
+        private static Rectangle MapRect(Rectangle rect, Rectangle targetRect, Size imageSize)
+        {
+            float sx = targetRect.Width / (float)Math.Max(1, imageSize.Width);
+            float sy = targetRect.Height / (float)Math.Max(1, imageSize.Height);
+            int left = targetRect.Left + (int)Math.Round(rect.Left * sx);
+            int top = targetRect.Top + (int)Math.Round(rect.Top * sy);
+            int right = targetRect.Left + (int)Math.Round(rect.Right * sx);
+            int bottom = targetRect.Top + (int)Math.Round(rect.Bottom * sy);
+            return Rectangle.FromLTRB(left, top, Math.Max(left + 1, right), Math.Max(top + 1, bottom));
+        }
+
+        private static Point MapPoint(Point point, Rectangle targetRect, Size imageSize)
+        {
+            float sx = targetRect.Width / (float)Math.Max(1, imageSize.Width);
+            float sy = targetRect.Height / (float)Math.Max(1, imageSize.Height);
+            return new Point(targetRect.Left + (int)Math.Round(point.X * sx), targetRect.Top + (int)Math.Round(point.Y * sy));
+        }
+
+        private static void DrawMosaicPreview(Graphics g, Bitmap source, Rectangle sourceBounds, Rectangle targetRect, Size imageSize, Point sourceOrigin)
+        {
+            var sampleBounds = new Rectangle(
+                sourceBounds.X + sourceOrigin.X,
+                sourceBounds.Y + sourceOrigin.Y,
+                sourceBounds.Width,
+                sourceBounds.Height);
+            sampleBounds = Rectangle.Intersect(new Rectangle(0, 0, source.Width, source.Height), sampleBounds);
+            if (sampleBounds.Width <= 0 || sampleBounds.Height <= 0)
+            {
+                return;
+            }
+
+            using (var mosaic = CreateMosaicRegion(source, sampleBounds, MosaicBlockSize))
+            {
+                var destination = MapRect(sourceBounds, targetRect, imageSize);
+                var oldInterpolation = g.InterpolationMode;
+                var oldPixelOffset = g.PixelOffsetMode;
+                g.InterpolationMode = InterpolationMode.NearestNeighbor;
+                g.PixelOffsetMode = PixelOffsetMode.Half;
+                g.DrawImage(mosaic, destination, new Rectangle(0, 0, mosaic.Width, mosaic.Height), GraphicsUnit.Pixel);
+                g.InterpolationMode = oldInterpolation;
+                g.PixelOffsetMode = oldPixelOffset;
+            }
+        }
+
+        private static void ApplyMosaic(Bitmap bitmap, Rectangle requestedBounds, int blockSize)
+        {
+            var bounds = Rectangle.Intersect(new Rectangle(0, 0, bitmap.Width, bitmap.Height), requestedBounds);
+            if (bounds.Width <= 0 || bounds.Height <= 0)
+            {
+                return;
+            }
+
+            using (var mosaic = CreateMosaicRegion(bitmap, bounds, blockSize))
+            using (var g = Graphics.FromImage(bitmap))
+            {
+                g.InterpolationMode = InterpolationMode.NearestNeighbor;
+                g.PixelOffsetMode = PixelOffsetMode.Half;
+                g.DrawImage(mosaic, bounds, new Rectangle(0, 0, mosaic.Width, mosaic.Height), GraphicsUnit.Pixel);
+            }
+        }
+
+        private static Bitmap CreateMosaicRegion(Bitmap source, Rectangle bounds, int blockSize)
+        {
+            int smallWidth = Math.Max(1, (int)Math.Ceiling(bounds.Width / (double)blockSize));
+            int smallHeight = Math.Max(1, (int)Math.Ceiling(bounds.Height / (double)blockSize));
+            var reduced = new Bitmap(smallWidth, smallHeight, PixelFormat.Format32bppArgb);
+            using (var g = Graphics.FromImage(reduced))
+            {
+                g.CompositingMode = CompositingMode.SourceCopy;
+                g.CompositingQuality = CompositingQuality.HighQuality;
+                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                g.DrawImage(source, new Rectangle(0, 0, smallWidth, smallHeight), bounds, GraphicsUnit.Pixel);
+            }
+            return reduced;
+        }
+    }
+
     internal sealed class CaptureToolbar : UserControl
     {
         public event EventHandler CopyClicked;
         public event EventHandler SaveClicked;
         public event EventHandler PinClicked;
+        public event EventHandler RectClicked;
+        public event EventHandler ArrowClicked;
+        public event EventHandler TextClicked;
+        public event EventHandler MosaicClicked;
+        public event EventHandler UndoClicked;
+        public event EventHandler ScrollClicked;
         public event EventHandler CancelClicked;
 
         private readonly ToolTip tooltip = new ToolTip();
+        private IconButton rectButton;
+        private IconButton arrowButton;
+        private IconButton textButton;
+        private IconButton mosaicButton;
 
         public CaptureToolbar()
         {
-            Width = 178;
+            Width = 472;
             Height = 38;
             BackColor = Color.Transparent;
+            rectButton = AddButton(ToolbarIcon.Rect, "Rectangle", 175, delegate { Raise(RectClicked); });
+            arrowButton = AddButton(ToolbarIcon.Arrow, "Arrow", 217, delegate { Raise(ArrowClicked); });
+            textButton = AddButton(ToolbarIcon.Text, "Text", 259, delegate { Raise(TextClicked); });
+            mosaicButton = AddButton(ToolbarIcon.Mosaic, "Mosaic", 301, delegate { Raise(MosaicClicked); });
+            AddButton(ToolbarIcon.Undo, "Undo", 343, delegate { Raise(UndoClicked); });
+            AddButton(ToolbarIcon.Scroll, "Scroll", 385, delegate { Raise(ScrollClicked); });
 
             AddButton(ToolbarIcon.Copy, "复制", 7, delegate { Raise(CopyClicked); });
             AddButton(ToolbarIcon.Save, "保存", 49, delegate { Raise(SaveClicked); });
@@ -1178,7 +2122,15 @@ namespace PinShotWin
             base.OnPaint(e);
         }
 
-        private void AddButton(ToolbarIcon icon, string tip, int x, EventHandler click)
+        public void SetActiveTool(AnnotationTool tool)
+        {
+            rectButton.Active = tool == AnnotationTool.Rectangle;
+            arrowButton.Active = tool == AnnotationTool.Arrow;
+            textButton.Active = tool == AnnotationTool.Text;
+            mosaicButton.Active = tool == AnnotationTool.Mosaic;
+        }
+
+        private IconButton AddButton(ToolbarIcon icon, string tip, int x, EventHandler click)
         {
             var button = new IconButton(icon)
             {
@@ -1188,6 +2140,7 @@ namespace PinShotWin
             button.Click += click;
             tooltip.SetToolTip(button, tip);
             Controls.Add(button);
+            return button;
         }
 
         private void Raise(EventHandler handler)
@@ -1216,6 +2169,12 @@ namespace PinShotWin
         Copy,
         Save,
         Pin,
+        Rect,
+        Arrow,
+        Text,
+        Mosaic,
+        Undo,
+        Scroll,
         Close
     }
 
@@ -1224,6 +2183,22 @@ namespace PinShotWin
         private readonly ToolbarIcon icon;
         private bool hovered;
         private bool pressed;
+        private bool active;
+
+        public bool Active
+        {
+            get { return active; }
+            set
+            {
+                if (active == value)
+                {
+                    return;
+                }
+
+                active = value;
+                Invalidate();
+            }
+        }
 
         public IconButton(ToolbarIcon icon)
         {
@@ -1266,10 +2241,10 @@ namespace PinShotWin
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
             e.Graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
             var rect = new Rectangle(1, 1, Width - 2, Height - 2);
-            if (hovered || pressed)
+            if (hovered || pressed || active)
             {
                 using (var path = RoundedRect(rect, 4))
-                using (var brush = new SolidBrush(pressed ? Color.FromArgb(224, 231, 242) : Color.FromArgb(240, 244, 250)))
+                using (var brush = new SolidBrush(active ? Color.FromArgb(220, 234, 255) : (pressed ? Color.FromArgb(224, 231, 242) : Color.FromArgb(240, 244, 250))))
                 {
                     e.Graphics.FillPath(brush, path);
                 }
@@ -1320,6 +2295,58 @@ namespace PinShotWin
                 g.DrawLine(pen, 0, 7, 0, 11);
                 path.Dispose();
                 g.ResetTransform();
+            }
+            else if (icon == ToolbarIcon.Rect)
+            {
+                g.DrawRectangle(pen, cx - 7, cy - 6, 14, 12);
+            }
+            else if (icon == ToolbarIcon.Arrow)
+            {
+                pen.EndCap = LineCap.ArrowAnchor;
+                g.DrawLine(pen, cx - 7, cy + 7, cx + 7, cy - 7);
+            }
+            else if (icon == ToolbarIcon.Text)
+            {
+                using (var font = new Font("Segoe UI", 16F, FontStyle.Bold, GraphicsUnit.Pixel))
+                {
+                    var format = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+                    g.DrawString("T", font, brush, new RectangleF(0, 1, Width, Height), format);
+                    format.Dispose();
+                }
+            }
+            else if (icon == ToolbarIcon.Mosaic)
+            {
+                for (int row = 0; row < 3; row++)
+                {
+                    for (int col = 0; col < 3; col++)
+                    {
+                        var fill = (row + col) % 2 == 0;
+                        var cell = new RectangleF(cx - 7 + col * 5, cy - 7 + row * 5, 4, 4);
+                        if (fill)
+                        {
+                            g.FillRectangle(brush, cell);
+                        }
+                        else
+                        {
+                            g.DrawRectangle(thinPen, cell.X, cell.Y, cell.Width, cell.Height);
+                        }
+                    }
+                }
+            }
+            else if (icon == ToolbarIcon.Undo)
+            {
+                g.DrawArc(pen, cx - 7, cy - 6, 14, 14, 210, 250);
+                g.DrawLine(pen, cx - 7, cy - 2, cx - 3, cy - 8);
+                g.DrawLine(pen, cx - 7, cy - 2, cx, cy - 2);
+            }
+            else if (icon == ToolbarIcon.Scroll)
+            {
+                g.DrawRectangle(thinPen, cx - 6, cy - 8, 12, 16);
+                g.DrawLine(thinPen, cx - 3, cy - 4, cx + 3, cy - 4);
+                g.DrawLine(thinPen, cx - 3, cy, cx + 3, cy);
+                g.DrawLine(pen, cx, cy + 3, cx, cy + 9);
+                g.DrawLine(pen, cx - 4, cy + 5, cx, cy + 9);
+                g.DrawLine(pen, cx + 4, cy + 5, cx, cy + 9);
             }
             else if (icon == ToolbarIcon.Close)
             {
@@ -1578,6 +2605,293 @@ namespace PinShotWin
             }
             return bitmap;
         }
+    }
+
+    internal static class ScrollingCapture
+    {
+        private const int WheelDelta = -720;
+        private const int DefaultOverlap = 80;
+        private const int PixelDifferenceThreshold = 45;
+
+        public static Bitmap Capture(Rectangle screenBounds, int maxFrames)
+        {
+            if (screenBounds.Width < 1 || screenBounds.Height < 1)
+            {
+                return null;
+            }
+
+            var frames = new List<Bitmap>();
+            Point oldCursor = Cursor.Position;
+            try
+            {
+                Cursor.Position = new Point(screenBounds.Left + screenBounds.Width / 2, screenBounds.Top + screenBounds.Height / 2);
+
+                for (int i = 0; i < maxFrames; i++)
+                {
+                    if (IsEscapePressed())
+                    {
+                        break;
+                    }
+
+                    Thread.Sleep(i == 0 ? 120 : 260);
+                    var frame = ScreenshotHelper.CaptureVirtualScreen(screenBounds);
+                    if (frames.Count > 0 && LooksSame(frames[frames.Count - 1], frame))
+                    {
+                        frame.Dispose();
+                        break;
+                    }
+
+                    frames.Add(frame);
+                    SendWheel(WheelDelta);
+                    Application.DoEvents();
+                }
+
+                if (frames.Count == 0)
+                {
+                    return null;
+                }
+
+                return Stitch(frames);
+            }
+            finally
+            {
+                Cursor.Position = oldCursor;
+                foreach (var frame in frames)
+                {
+                    frame.Dispose();
+                }
+            }
+        }
+
+        public static Bitmap StitchForTest(IList<Bitmap> frames)
+        {
+            return Stitch(frames);
+        }
+
+        private static Bitmap Stitch(IList<Bitmap> frames)
+        {
+            if (frames.Count == 0)
+            {
+                return null;
+            }
+
+            Rectangle contentBounds = DetectScrollingBounds(frames);
+            var shifts = new List<int>();
+            int height = contentBounds.Height;
+            for (int i = 1; i < frames.Count; i++)
+            {
+                int shift = FindVerticalShift(frames[i - 1], frames[i], contentBounds);
+                shifts.Add(shift);
+                height += shift;
+            }
+
+            var output = new Bitmap(contentBounds.Width, height, PixelFormat.Format32bppArgb);
+            using (var g = Graphics.FromImage(output))
+            {
+                g.Clear(Color.Transparent);
+                int destinationY = 0;
+                for (int i = 0; i < frames.Count; i++)
+                {
+                    int shift = i == 0 ? contentBounds.Height : shifts[i - 1];
+                    int overlap = contentBounds.Height - shift;
+                    int sourceY = i == 0 ? contentBounds.Top : contentBounds.Top + overlap;
+                    int sourceHeight = i == 0 ? contentBounds.Height : shift;
+                    var source = new Rectangle(contentBounds.Left, sourceY, contentBounds.Width, sourceHeight);
+                    var dest = new Rectangle(0, destinationY, contentBounds.Width, sourceHeight);
+                    g.DrawImage(frames[i], dest, source, GraphicsUnit.Pixel);
+                    destinationY += sourceHeight;
+                }
+            }
+
+            return output;
+        }
+
+        private static Rectangle DetectScrollingBounds(IList<Bitmap> frames)
+        {
+            int minX = frames[0].Width;
+            int minY = frames[0].Height;
+            int maxX = -1;
+            int maxY = -1;
+            int changed = 0;
+            int comparisons = Math.Min(frames.Count - 1, 4);
+
+            for (int i = 0; i < comparisons; i++)
+            {
+                using (var a = new PixelBuffer(frames[i]))
+                using (var b = new PixelBuffer(frames[i + 1]))
+                {
+                    for (int y = 0; y < a.Height; y += 3)
+                    {
+                        for (int x = 0; x < a.Width; x += 3)
+                        {
+                            if (a.Difference(b, x, y) <= PixelDifferenceThreshold)
+                            {
+                                continue;
+                            }
+
+                            minX = Math.Min(minX, x);
+                            minY = Math.Min(minY, y);
+                            maxX = Math.Max(maxX, x);
+                            maxY = Math.Max(maxY, y);
+                            changed++;
+                        }
+                    }
+                }
+            }
+
+            var full = new Rectangle(0, 0, frames[0].Width, frames[0].Height);
+            if (changed < 24 || maxX <= minX || maxY <= minY)
+            {
+                return full;
+            }
+
+            var detected = Rectangle.FromLTRB(
+                Math.Max(0, minX - 6),
+                Math.Max(0, minY - 6),
+                Math.Min(full.Right, maxX + 9),
+                Math.Min(full.Bottom, maxY + 9));
+
+            if (detected.Width < full.Width / 4 || detected.Height < full.Height / 3)
+            {
+                return full;
+            }
+
+            return detected;
+        }
+
+        private static int FindVerticalShift(Bitmap previous, Bitmap current, Rectangle bounds)
+        {
+            int minShift = Math.Max(12, bounds.Height / 12);
+            int maxShift = Math.Max(minShift, bounds.Height - Math.Max(24, bounds.Height / 10));
+            int bestShift = Math.Max(1, bounds.Height - Math.Min(DefaultOverlap, bounds.Height / 4));
+            double bestScore = double.MaxValue;
+
+            using (var a = new PixelBuffer(previous))
+            using (var b = new PixelBuffer(current))
+            {
+                int xStep = Math.Max(2, bounds.Width / 24);
+                for (int shift = minShift; shift <= maxShift; shift += 2)
+                {
+                    int overlap = bounds.Height - shift;
+                    int yStep = Math.Max(2, overlap / 20);
+                    long difference = 0;
+                    int samples = 0;
+
+                    for (int y = 4; y < overlap - 4; y += yStep)
+                    {
+                        for (int x = bounds.Left + 4; x < bounds.Right - 4; x += xStep)
+                        {
+                            difference += a.Difference(b, x, bounds.Top + shift + y, x, bounds.Top + y);
+                            samples++;
+                        }
+                    }
+
+                    if (samples == 0)
+                    {
+                        continue;
+                    }
+
+                    double score = difference / (double)samples;
+                    if (score < bestScore)
+                    {
+                        bestScore = score;
+                        bestShift = shift;
+                    }
+                }
+            }
+
+            if (bestScore > 28)
+            {
+                return Math.Max(1, bounds.Height - Math.Min(DefaultOverlap, bounds.Height / 4));
+            }
+
+            return bestShift;
+        }
+
+        private static bool LooksSame(Bitmap a, Bitmap b)
+        {
+            if (a.Width != b.Width || a.Height != b.Height)
+            {
+                return false;
+            }
+
+            int changed = 0;
+            int samples = 0;
+            int stepX = Math.Max(2, a.Width / 28);
+            int stepY = Math.Max(2, a.Height / 28);
+            using (var first = new PixelBuffer(a))
+            using (var second = new PixelBuffer(b))
+            {
+                for (int y = stepY / 2; y < a.Height; y += stepY)
+                {
+                    for (int x = stepX / 2; x < a.Width; x += stepX)
+                    {
+                        if (first.Difference(second, x, y) > PixelDifferenceThreshold)
+                        {
+                            changed++;
+                        }
+                        samples++;
+                    }
+                }
+            }
+
+            return samples > 0 && changed / (double)samples < 0.008;
+        }
+
+        private sealed class PixelBuffer : IDisposable
+        {
+            private readonly Bitmap bitmap;
+            private readonly BitmapData data;
+            private readonly byte[] pixels;
+
+            public int Width { get { return bitmap.Width; } }
+            public int Height { get { return bitmap.Height; } }
+
+            public PixelBuffer(Bitmap bitmap)
+            {
+                this.bitmap = bitmap;
+                data = bitmap.LockBits(new Rectangle(0, 0, bitmap.Width, bitmap.Height), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+                pixels = new byte[Math.Abs(data.Stride) * bitmap.Height];
+                Marshal.Copy(data.Scan0, pixels, 0, pixels.Length);
+            }
+
+            public int Difference(PixelBuffer other, int x, int y)
+            {
+                return Difference(other, x, y, x, y);
+            }
+
+            public int Difference(PixelBuffer other, int x1, int y1, int x2, int y2)
+            {
+                int firstRow = data.Stride >= 0 ? y1 : Height - 1 - y1;
+                int secondRow = other.data.Stride >= 0 ? y2 : other.Height - 1 - y2;
+                int first = firstRow * Math.Abs(data.Stride) + x1 * 4;
+                int second = secondRow * Math.Abs(other.data.Stride) + x2 * 4;
+                return Math.Abs(pixels[first] - other.pixels[second]) +
+                    Math.Abs(pixels[first + 1] - other.pixels[second + 1]) +
+                    Math.Abs(pixels[first + 2] - other.pixels[second + 2]);
+            }
+
+            public void Dispose()
+            {
+                bitmap.UnlockBits(data);
+            }
+        }
+
+        private static void SendWheel(int delta)
+        {
+            mouse_event(0x0800, 0, 0, delta, UIntPtr.Zero);
+        }
+
+        private static bool IsEscapePressed()
+        {
+            return (GetAsyncKeyState((int)Keys.Escape) & 0x8000) != 0;
+        }
+
+        [DllImport("user32.dll")]
+        private static extern void mouse_event(uint flags, uint dx, uint dy, int data, UIntPtr extraInfo);
+
+        [DllImport("user32.dll")]
+        private static extern short GetAsyncKeyState(int virtualKey);
     }
 
     internal static class ImageFile

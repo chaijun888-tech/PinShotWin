@@ -1,6 +1,14 @@
-bin/
+bin/*
+!bin/PinShotWin.exe
+!bin/assets/
+bin/assets/*
+!bin/assets/app.ico
 obj/
-release/
+release/*
+!release/PinShotWin-0.2.0.zip
+!release/PinShotWin-0.2.0.zip.sha256
+!release/PinShotWinSetup-0.2.0.exe
+!release/PinShotWinSetup-0.2.0.exe.sha256
 *.user
 *.suo
 *.log

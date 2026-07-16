@@ -2,7 +2,7 @@
 
 Windows tray screenshot tool.
 
-Current version: `0.1.0`
+Current version: `0.2.0`
 
 ## Build
 
@@ -22,10 +22,10 @@ bin\PinShotWin.exe
 powershell -ExecutionPolicy Bypass -File .\verify.ps1
 ```
 
-Verify release package and setup exe:
+Verify release package, UI self-test, and setup exe:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\verify.ps1 -IncludeInstaller
+powershell -ExecutionPolicy Bypass -File .\verify.ps1 -IncludeInstaller -IncludeUi
 ```
 
 ## Release
@@ -69,6 +69,7 @@ powershell -ExecutionPolicy Bypass -File .\uninstall.ps1
 - Copy current capture: `Ctrl+C`
 - Save current capture: `Ctrl+S`
 - Pin current capture: `Ctrl+P`
+- Undo latest annotation: `Ctrl+Z`
 - Copy current capture: `Enter`
 - Nudge preview selection: arrow keys
 - Resize preview selection: `Ctrl` + arrow keys
@@ -85,6 +86,8 @@ powershell -ExecutionPolicy Bypass -File .\uninstall.ps1
 - Window hover selection
 - Manual rectangle selection
 - Copy, save, pin, cancel toolbar
+- Rectangle, arrow, text, mosaic, undo, and scrolling capture toolbar actions
+- Final copy/save/pin/history output includes annotations and mosaic
 - Adjustable preview selection with size display
 - Keyboard nudge and resize for preview selection
 - Multiple pinned images

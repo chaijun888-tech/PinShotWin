@@ -1,5 +1,6 @@
 param(
-    [switch]$IncludeInstaller
+    [switch]$IncludeInstaller,
+    [switch]$IncludeUi
 )
 
 $ErrorActionPreference = "Stop"
@@ -72,6 +73,64 @@ $running | Stop-Process -Force
 Assert-True ($running.Count -eq 1) "Expected one running PinShotWin process, got $($running.Count)"
 Assert-True $secondExited "Second instance did not exit"
 
+if ($IncludeUi) {
+    Write-Host "Checking UI rendering self-test..."
+    $uiOut = Join-Path $root "obj\ui-test"
+    if (Test-Path -LiteralPath $uiOut) {
+        Remove-Item -LiteralPath $uiOut -Recurse -Force
+    }
+    New-Item -ItemType Directory -Path $uiOut | Out-Null
+
+    $uiProcess = Start-Process -FilePath $exePath -ArgumentList @("--self-test-ui", $uiOut) -PassThru -Wait -WindowStyle Hidden
+    Assert-True ($uiProcess.ExitCode -eq 0) "UI self-test exited with $($uiProcess.ExitCode)"
+
+    $dragResultPath = Join-Path $uiOut "drag-performance.txt"
+    $dragProcess = Start-Process -FilePath $exePath -ArgumentList @("--self-test-drag", $dragResultPath) -PassThru -Wait -WindowStyle Hidden
+    Assert-True ($dragProcess.ExitCode -eq 0) "Drag performance self-test exited with $($dragProcess.ExitCode)"
+    Assert-True (Test-Path -LiteralPath $dragResultPath) "Missing drag performance result"
+    $dragValues = @{}
+    Get-Content -LiteralPath $dragResultPath | ForEach-Object {
+        $parts = $_.Split('=', 2)
+        if ($parts.Count -eq 2) { $dragValues[$parts[0]] = $parts[1] }
+    }
+    $dragFps = [double]$dragValues['fps']
+    Assert-True ($dragFps -ge 50) "Preview drag performance too low: $dragFps FPS"
+    Assert-True ([int]$dragValues['selection_x'] -eq 600) "Preview drag did not reach the expected location"
+
+    $annotationPath = Join-Path $uiOut "annotation.png"
+    $scrollPath = Join-Path $uiOut "scroll.png"
+    $movedSelectionPath = Join-Path $uiOut "moved-selection.png"
+    $annotationOrderPath = Join-Path $uiOut "annotation-order.png"
+    Assert-True (Test-Path -LiteralPath $annotationPath) "Missing annotation self-test image"
+    Assert-True (Test-Path -LiteralPath $scrollPath) "Missing scroll self-test image"
+    Assert-True (Test-Path -LiteralPath $movedSelectionPath) "Missing moved selection self-test image"
+    Assert-True (Test-Path -LiteralPath $annotationOrderPath) "Missing annotation order self-test image"
+    Assert-True ((Get-Content -LiteralPath (Join-Path $uiOut "text-escape.txt") -Raw).Trim() -eq "pass") "Escape did not cancel text editing cleanly"
+
+    Add-Type -AssemblyName System.Drawing
+    $annotation = [System.Drawing.Bitmap]::FromFile($annotationPath)
+    $scroll = [System.Drawing.Bitmap]::FromFile($scrollPath)
+    $movedSelection = [System.Drawing.Bitmap]::FromFile($movedSelectionPath)
+    $annotationOrder = [System.Drawing.Bitmap]::FromFile($annotationOrderPath)
+    try {
+        Assert-True ($annotation.Width -eq 180 -and $annotation.Height -eq 180) "Unexpected annotation image size"
+        Assert-True ($scroll.Width -lt 300 -and $scroll.Width -ge 220) "Scroll stitch did not remove the fixed sidebar"
+        Assert-True ($scroll.Height -ge 650 -and $scroll.Height -le 665) "Unexpected scroll image height: $($scroll.Height)"
+        $redProbe = $annotation.GetPixel(20, 20)
+        Assert-True ($redProbe.R -gt 150 -and $redProbe.G -lt 100) "Annotation rectangle probe did not render red"
+        $movedProbe = $movedSelection.GetPixel(20, 20)
+        Assert-True ($movedProbe.G -gt 200 -and $movedProbe.R -lt 100) "Moved selection did not use its new screen region"
+        $annotationOrderRed = [int](Get-Content -LiteralPath (Join-Path $uiOut "annotation-order-red.txt") -Raw)
+        Assert-True ($annotationOrderRed -eq 0) "Mosaic did not cover the earlier annotation"
+    }
+    finally {
+        $annotation.Dispose()
+        $scroll.Dispose()
+        $movedSelection.Dispose()
+        $annotationOrder.Dispose()
+    }
+}
+
 if ($IncludeInstaller) {
     Write-Host "Checking single-file setup installer..."
     & (Join-Path $root "make-installer.ps1")
@@ -81,6 +140,10 @@ if ($IncludeInstaller) {
     $installerRecordedHash = (Get-Content -LiteralPath "$installerPath.sha256").Split(" ")[0]
     $installerActualHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $installerPath).Hash
     Assert-True ($installerRecordedHash -eq $installerActualHash) "Setup installer checksum mismatch"
+
+    Start-Sleep -Seconds 2
+    $installerDelayedHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $installerPath).Hash
+    Assert-True ($installerRecordedHash -eq $installerDelayedHash) "Setup installer changed after checksum generation"
 }
 
 Write-Host "Verification passed for PinShotWin $version"
