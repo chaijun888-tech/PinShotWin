@@ -521,6 +521,7 @@ namespace PinShotWin
             }
 
             WriteResult(outputDir, "text-escape.txt", CaptureOverlay.RunTextEscapeTest() ? "pass" : "fail");
+            WriteResult(outputDir, "long-preview-lock.txt", CaptureOverlay.RunLongPreviewLockTest() ? "pass" : "fail");
         }
 
         private static Bitmap CreateSourceImage()
@@ -1362,6 +1363,32 @@ namespace PinShotWin
             }
         }
 
+        public static bool RunLongPreviewLockTest()
+        {
+            using (var overlay = new CaptureOverlay(new AppSettings()))
+            {
+                overlay.Show();
+                Application.DoEvents();
+                overlay.selectedBounds = new Rectangle(260, 180, 640, 320);
+                overlay.EnterPreview();
+                overlay.SetPreviewBitmap(new Bitmap(640, 1280, PixelFormat.Format32bppArgb));
+                overlay.selectedBounds = CalculateScrollingPreviewBounds(
+                    overlay.selectedBounds,
+                    overlay.previewBitmap.Size,
+                    overlay.ClientRectangle,
+                    overlay.toolbar.Height);
+
+                Rectangle before = overlay.selectedBounds;
+                overlay.AdjustSelectionWithKeyboard(Keys.Right, true, 10);
+                bool resizeLocked = overlay.selectedBounds == before;
+                overlay.AdjustSelectionWithKeyboard(Keys.Right, false, 10);
+                Rectangle moved = overlay.selectedBounds;
+                bool moveAllowed = moved.X == before.X + 10 && moved.Size == before.Size;
+                bool originalSizeShown = FormatSelectionSize(overlay.previewBitmap.Size) == "640 x 1280";
+                return resizeLocked && moveAllowed && originalSizeShown;
+            }
+        }
+
         protected override void OnShown(EventArgs e)
         {
             base.OnShown(e);
@@ -1625,8 +1652,11 @@ namespace PinShotWin
                         }
                     }
                     g.Restore(state);
-                    DrawSelectionHandles(g, rect);
-                    DrawSelectionSize(g, rect);
+                    if (previewBitmap == null)
+                    {
+                        DrawSelectionHandles(g, rect);
+                    }
+                    DrawSelectionSize(g, rect, PreviewImageSize);
                 }
             }
         }
@@ -2204,6 +2234,11 @@ namespace PinShotWin
                 return SelectionDragMode.None;
             }
 
+            if (previewBitmap != null)
+            {
+                return selectedBounds.Contains(point) ? SelectionDragMode.Move : SelectionDragMode.None;
+            }
+
             const int grip = 8;
             bool left = Math.Abs(point.X - selectedBounds.Left) <= grip;
             bool right = Math.Abs(point.X - selectedBounds.Right) <= grip;
@@ -2261,6 +2296,11 @@ namespace PinShotWin
 
         private void AdjustSelectionWithKeyboard(Keys keyCode, bool resize, int step)
         {
+            if (resize && previewBitmap != null)
+            {
+                return;
+            }
+
             Rectangle bounds = selectedBounds;
             int dx = 0;
             int dy = 0;
@@ -2349,9 +2389,14 @@ namespace PinShotWin
             }
         }
 
-        private static void DrawSelectionSize(Graphics g, Rectangle rect)
+        private static string FormatSelectionSize(Size size)
         {
-            string text = rect.Width + " x " + rect.Height;
+            return size.Width + " x " + size.Height;
+        }
+
+        private static void DrawSelectionSize(Graphics g, Rectangle rect, Size imageSize)
+        {
+            string text = FormatSelectionSize(imageSize);
             using (var font = new Font("Segoe UI", 8.5F, FontStyle.Regular))
             {
                 var size = g.MeasureString(text, font);

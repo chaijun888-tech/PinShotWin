@@ -20,6 +20,7 @@
 - Enabled Per-Monitor V2 DPI awareness for mixed-scale displays.
 - Preserved the previous global hotkey when a replacement key cannot be registered.
 - Added retry and nonfatal error handling for all clipboard image writes.
+- Locked long screenshot previews to their aspect ratio and displayed their original dimensions.
 
 ## 0.1.0 - 2026-07-09
 

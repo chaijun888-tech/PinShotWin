@@ -116,6 +116,7 @@ if ($IncludeUi) {
     Assert-True (Test-Path -LiteralPath $annotationOrderPath) "Missing annotation order self-test image"
     Assert-True (Test-Path -LiteralPath $diagonalArrowPath) "Missing diagonal arrow self-test image"
     Assert-True ((Get-Content -LiteralPath (Join-Path $uiOut "text-escape.txt") -Raw).Trim() -eq "pass") "Escape did not cancel text editing cleanly"
+    Assert-True ((Get-Content -LiteralPath (Join-Path $uiOut "long-preview-lock.txt") -Raw).Trim() -eq "pass") "Long screenshot preview could be distorted or displayed the wrong size"
     $dpiAwareness = [int](Get-Content -LiteralPath (Join-Path $uiOut "dpi-awareness.txt") -Raw)
     Assert-True ($dpiAwareness -eq 2) "Process is not Per-Monitor DPI aware: $dpiAwareness"
     Assert-True ((Get-Content -LiteralPath (Join-Path $uiOut "hotkey-rollback.txt") -Raw).Trim() -eq "pass") "Hotkey registration failure did not preserve the previous hotkey"
