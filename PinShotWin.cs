@@ -244,6 +244,22 @@ namespace PinShotWin
                 }
             }
 
+            using (var source = new Bitmap(220, 160, PixelFormat.Format32bppArgb))
+            using (var g = Graphics.FromImage(source))
+            {
+                g.Clear(Color.White);
+                var diagonalArrow = new List<Annotation>
+                {
+                    new Annotation { Kind = AnnotationKind.Arrow, Start = new Point(20, 135), End = new Point(198, 38) }
+                };
+                using (var rendered = AnnotationRenderer.Render(source, diagonalArrow))
+                {
+                    rendered.Save(Path.Combine(outputDir, "arrow-diagonal.png"), ImageFormat.Png);
+                    WriteResult(outputDir, "arrow-diagonal-solid.txt", CountSolidArrowPixels(rendered).ToString());
+                    WriteResult(outputDir, "arrow-diagonal-edge.txt", CountAntialiasedArrowPixels(rendered).ToString());
+                }
+            }
+
             using (var canvas = CreateScrollingCanvas(240, 660))
             using (var a = CreateScrollingFrame(canvas, 0))
             using (var b = CreateScrollingFrame(canvas, 180))
@@ -354,6 +370,42 @@ namespace PinShotWin
                 {
                     Color color = bitmap.GetPixel(x, y);
                     if (color.R > 180 && color.G < 100 && color.B < 100)
+                    {
+                        count++;
+                    }
+                }
+            }
+            return count;
+        }
+
+        private static int CountSolidArrowPixels(Bitmap bitmap)
+        {
+            int count = 0;
+            for (int y = 0; y < bitmap.Height; y++)
+            {
+                for (int x = 0; x < bitmap.Width; x++)
+                {
+                    Color color = bitmap.GetPixel(x, y);
+                    if (color.R >= 225 && color.R <= 242 && color.G <= 55 && color.B <= 55)
+                    {
+                        count++;
+                    }
+                }
+            }
+            return count;
+        }
+
+        private static int CountAntialiasedArrowPixels(Bitmap bitmap)
+        {
+            int count = 0;
+            for (int y = 0; y < bitmap.Height; y++)
+            {
+                for (int x = 0; x < bitmap.Width; x++)
+                {
+                    Color color = bitmap.GetPixel(x, y);
+                    bool white = color.R == 255 && color.G == 255 && color.B == 255;
+                    bool solidRed = color.R >= 225 && color.R <= 242 && color.G <= 55 && color.B <= 55;
+                    if (!white && !solidRed && color.R > color.G + 30 && color.R > color.B + 30)
                     {
                         count++;
                     }
@@ -1967,6 +2019,11 @@ namespace PinShotWin
                 return;
             }
 
+            var state = g.Save();
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.CompositingQuality = CompositingQuality.HighQuality;
+            g.PixelOffsetMode = PixelOffsetMode.Half;
+
             if (annotation.Kind == AnnotationKind.Rectangle)
             {
                 using (var pen = new Pen(Red, 2.3F))
@@ -1977,12 +2034,7 @@ namespace PinShotWin
             }
             else if (annotation.Kind == AnnotationKind.Arrow)
             {
-                using (var pen = new Pen(Red, 2.5F))
-                {
-                    pen.StartCap = LineCap.Round;
-                    pen.EndCap = LineCap.ArrowAnchor;
-                    g.DrawLine(pen, MapPoint(annotation.Start, targetRect, imageSize), MapPoint(annotation.End, targetRect, imageSize));
-                }
+                DrawArrow(g, MapPoint(annotation.Start, targetRect, imageSize), MapPoint(annotation.End, targetRect, imageSize), 2.5F);
             }
             else if (annotation.Kind == AnnotationKind.Text)
             {
@@ -1992,6 +2044,49 @@ namespace PinShotWin
                 {
                     g.DrawString(annotation.Text ?? string.Empty, font, brush, rect);
                 }
+            }
+
+            g.Restore(state);
+        }
+
+        private static void DrawArrow(Graphics g, Point start, Point end, float lineWidth)
+        {
+            double dx = end.X - start.X;
+            double dy = end.Y - start.Y;
+            double length = Math.Sqrt(dx * dx + dy * dy);
+            if (length < 1.0)
+            {
+                return;
+            }
+
+            double ux = dx / length;
+            double uy = dy / length;
+            float headLength = Math.Min(18F, Math.Max(10F, lineWidth * 5F));
+            float headHalfWidth = Math.Min(10F, Math.Max(6F, lineWidth * 3F));
+            if (length < headLength * 1.5)
+            {
+                headLength = (float)(length * 0.45);
+                headHalfWidth = Math.Max(3F, headLength * 0.55F);
+            }
+
+            var baseCenter = new PointF(
+                (float)(end.X - ux * headLength),
+                (float)(end.Y - uy * headLength));
+            var left = new PointF(
+                (float)(baseCenter.X - uy * headHalfWidth),
+                (float)(baseCenter.Y + ux * headHalfWidth));
+            var right = new PointF(
+                (float)(baseCenter.X + uy * headHalfWidth),
+                (float)(baseCenter.Y - ux * headHalfWidth));
+
+            using (var pen = new Pen(Red, lineWidth))
+            using (var brush = new SolidBrush(Red))
+            {
+                pen.StartCap = LineCap.Round;
+                pen.EndCap = LineCap.Round;
+                pen.LineJoin = LineJoin.Round;
+                g.DrawLine(pen, start, baseCenter);
+                g.FillPolygon(brush, new[] { new PointF(end.X, end.Y), left, right }, FillMode.Winding);
             }
         }
 

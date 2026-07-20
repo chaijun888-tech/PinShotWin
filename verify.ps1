@@ -101,10 +101,12 @@ if ($IncludeUi) {
     $scrollPath = Join-Path $uiOut "scroll.png"
     $movedSelectionPath = Join-Path $uiOut "moved-selection.png"
     $annotationOrderPath = Join-Path $uiOut "annotation-order.png"
+    $diagonalArrowPath = Join-Path $uiOut "arrow-diagonal.png"
     Assert-True (Test-Path -LiteralPath $annotationPath) "Missing annotation self-test image"
     Assert-True (Test-Path -LiteralPath $scrollPath) "Missing scroll self-test image"
     Assert-True (Test-Path -LiteralPath $movedSelectionPath) "Missing moved selection self-test image"
     Assert-True (Test-Path -LiteralPath $annotationOrderPath) "Missing annotation order self-test image"
+    Assert-True (Test-Path -LiteralPath $diagonalArrowPath) "Missing diagonal arrow self-test image"
     Assert-True ((Get-Content -LiteralPath (Join-Path $uiOut "text-escape.txt") -Raw).Trim() -eq "pass") "Escape did not cancel text editing cleanly"
 
     Add-Type -AssemblyName System.Drawing
@@ -112,6 +114,7 @@ if ($IncludeUi) {
     $scroll = [System.Drawing.Bitmap]::FromFile($scrollPath)
     $movedSelection = [System.Drawing.Bitmap]::FromFile($movedSelectionPath)
     $annotationOrder = [System.Drawing.Bitmap]::FromFile($annotationOrderPath)
+    $diagonalArrow = [System.Drawing.Bitmap]::FromFile($diagonalArrowPath)
     try {
         Assert-True ($annotation.Width -eq 180 -and $annotation.Height -eq 180) "Unexpected annotation image size"
         Assert-True ($scroll.Width -lt 300 -and $scroll.Width -ge 220) "Scroll stitch did not remove the fixed sidebar"
@@ -122,12 +125,17 @@ if ($IncludeUi) {
         Assert-True ($movedProbe.G -gt 200 -and $movedProbe.R -lt 100) "Moved selection did not use its new screen region"
         $annotationOrderRed = [int](Get-Content -LiteralPath (Join-Path $uiOut "annotation-order-red.txt") -Raw)
         Assert-True ($annotationOrderRed -eq 0) "Mosaic did not cover the earlier annotation"
+        $arrowSolidPixels = [int](Get-Content -LiteralPath (Join-Path $uiOut "arrow-diagonal-solid.txt") -Raw)
+        $arrowEdgePixels = [int](Get-Content -LiteralPath (Join-Path $uiOut "arrow-diagonal-edge.txt") -Raw)
+        Assert-True ($arrowSolidPixels -ge 250) "Diagonal arrow body is incomplete: $arrowSolidPixels solid pixels"
+        Assert-True ($arrowEdgePixels -ge 120) "Diagonal arrow antialiasing is too weak: $arrowEdgePixels edge pixels"
     }
     finally {
         $annotation.Dispose()
         $scroll.Dispose()
         $movedSelection.Dispose()
         $annotationOrder.Dispose()
+        $diagonalArrow.Dispose()
     }
 }
 
