@@ -15,6 +15,11 @@
 - Made Escape cancel active text editing before closing the capture overlay.
 - Improved diagonal arrow annotations with a shared antialiased vector arrow for preview and final output.
 - Hid the capture toolbar while moving or resizing the selection, then restored it after release to prevent flicker.
+- Bounded scrolling capture memory with a three-frame bootstrap, compressed strips, and output-size limits.
+- Added a total pixel limit for recent screenshot history.
+- Enabled Per-Monitor V2 DPI awareness for mixed-scale displays.
+- Preserved the previous global hotkey when a replacement key cannot be registered.
+- Added retry and nonfatal error handling for all clipboard image writes.
 
 ## 0.1.0 - 2026-07-09
 

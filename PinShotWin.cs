@@ -20,6 +20,8 @@ namespace PinShotWin
         [STAThread]
         private static void Main(string[] args)
         {
+            DpiAwareness.Enable();
+
             if (args.Length >= 2 && string.Equals(args[0], "--self-test-ui", StringComparison.OrdinalIgnoreCase))
             {
                 Application.EnableVisualStyles();
@@ -50,6 +52,74 @@ namespace PinShotWin
                 GC.KeepAlive(mutex);
             }
         }
+    }
+
+    internal static class DpiAwareness
+    {
+        private static readonly IntPtr PerMonitorAwareV2 = new IntPtr(-4);
+
+        public static void Enable()
+        {
+            try
+            {
+                if (SetProcessDpiAwarenessContext(PerMonitorAwareV2))
+                {
+                    return;
+                }
+            }
+            catch (EntryPointNotFoundException)
+            {
+            }
+
+            try
+            {
+                if (SetProcessDpiAwareness(2) >= 0)
+                {
+                    return;
+                }
+            }
+            catch (DllNotFoundException)
+            {
+            }
+            catch (EntryPointNotFoundException)
+            {
+            }
+
+            try
+            {
+                SetProcessDPIAware();
+            }
+            catch (EntryPointNotFoundException)
+            {
+            }
+        }
+
+        public static int GetCurrentAwarenessForTest()
+        {
+            try
+            {
+                return GetAwarenessFromDpiAwarenessContext(GetThreadDpiAwarenessContext());
+            }
+            catch (EntryPointNotFoundException)
+            {
+                return -1;
+            }
+        }
+
+        [DllImport("user32.dll")]
+        private static extern bool SetProcessDpiAwarenessContext(IntPtr value);
+
+        [DllImport("shcore.dll")]
+        private static extern int SetProcessDpiAwareness(int awareness);
+
+        [DllImport("user32.dll")]
+        private static extern bool SetProcessDPIAware();
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetThreadDpiAwarenessContext();
+
+        [DllImport("user32.dll")]
+        private static extern int GetAwarenessFromDpiAwarenessContext(IntPtr value);
     }
 
     internal sealed class TrayContext : ApplicationContext
@@ -98,7 +168,14 @@ namespace PinShotWin
 
         private void RegisterCurrentHotkey()
         {
-            hotkeyWindow.Register(settings.Hotkey);
+            if (!hotkeyWindow.TryRegister(settings.Hotkey))
+            {
+                MessageBox.Show(
+                    "快捷键 " + settings.Hotkey + " 注册失败，可能被其他程序占用。",
+                    "PinShotWin",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            }
         }
 
         private void ShowSettings()
@@ -107,10 +184,20 @@ namespace PinShotWin
             {
                 if (form.ShowDialog() == DialogResult.OK)
                 {
-                    settings = form.Settings;
+                    AppSettings updated = form.Settings;
+                    if (!hotkeyWindow.TryRegister(updated.Hotkey))
+                    {
+                        MessageBox.Show(
+                            "快捷键 " + updated.Hotkey + " 已被占用，原快捷键 " + settings.Hotkey + " 继续有效。",
+                            "PinShotWin",
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Warning);
+                        updated.Hotkey = settings.Hotkey;
+                    }
+
+                    settings = updated;
                     settings.Save();
                     StartupManager.SetEnabled(settings.StartWithWindows);
-                    RegisterCurrentHotkey();
                 }
             }
         }
@@ -160,7 +247,7 @@ namespace PinShotWin
                 var item = items[i];
                 var menuItem = new ToolStripMenuItem((i + 1) + ". " + item.CreatedAt.ToString("HH:mm:ss") + "  " + item.Image.Width + "x" + item.Image.Height);
                 Bitmap image = item.Image;
-                menuItem.DropDownItems.Add("复制", null, delegate { Clipboard.SetImage((Bitmap)image.Clone()); });
+                menuItem.DropDownItems.Add("复制", null, delegate { ClipboardHelper.TrySetImage(image, null); });
                 menuItem.DropDownItems.Add("保存", null, delegate { SaveHistoryImage(image); });
                 menuItem.DropDownItems.Add("钉住", null, delegate { new PinWindow((Bitmap)image.Clone(), Cursor.Position).Show(); });
                 recentMenu.DropDownItems.Add(menuItem);
@@ -220,11 +307,79 @@ namespace PinShotWin
         }
     }
 
+    internal static class ClipboardHelper
+    {
+        private const int RetryCount = 5;
+        private const int RetryDelayMilliseconds = 80;
+
+        public static bool TrySetImage(Bitmap image, IWin32Window owner)
+        {
+            using (var copy = (Bitmap)image.Clone())
+            {
+                var data = new DataObject();
+                data.SetData(DataFormats.Bitmap, true, copy);
+                if (TryWithRetry(delegate { Clipboard.SetDataObject(data, true); }, RetryCount, RetryDelayMilliseconds))
+                {
+                    return true;
+                }
+            }
+
+            const string message = "剪贴板正被其他程序占用，请稍后重试。";
+            if (owner == null)
+            {
+                MessageBox.Show(message, "PinShotWin", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            else
+            {
+                MessageBox.Show(owner, message, "PinShotWin", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            return false;
+        }
+
+        internal static bool RunRetryTest()
+        {
+            int attempts = 0;
+            bool result = TryWithRetry(delegate
+            {
+                attempts++;
+                if (attempts < 3)
+                {
+                    throw new ExternalException("clipboard busy");
+                }
+            }, RetryCount, 0);
+            return result && attempts == 3;
+        }
+
+        private static bool TryWithRetry(Action action, int attempts, int delayMilliseconds)
+        {
+            for (int attempt = 0; attempt < attempts; attempt++)
+            {
+                try
+                {
+                    action();
+                    return true;
+                }
+                catch (ExternalException)
+                {
+                    if (attempt + 1 < attempts && delayMilliseconds > 0)
+                    {
+                        Thread.Sleep(delayMilliseconds);
+                    }
+                }
+            }
+            return false;
+        }
+    }
+
     internal static class SelfTestUi
     {
         public static void Run(string outputDir)
         {
             Directory.CreateDirectory(outputDir);
+            WriteResult(outputDir, "dpi-awareness.txt", DpiAwareness.GetCurrentAwarenessForTest().ToString());
+            WriteResult(outputDir, "hotkey-rollback.txt", HotkeyWindow.RunRegistrationRollbackTest() ? "pass" : "fail");
+            WriteResult(outputDir, "clipboard-retry.txt", ClipboardHelper.RunRetryTest() ? "pass" : "fail");
+            WriteResult(outputDir, "history-limit.txt", ScreenshotHistory.RunLimitTest() ? "pass" : "fail");
 
             using (var source = CreateSourceImage())
             {
@@ -287,7 +442,48 @@ namespace PinShotWin
                     WriteResult(outputDir, "scroll_editor_diagnostics.txt", ScrollingCapture.GetDiagnosticsForTest(frames));
                     WriteResult(outputDir, "scroll_editor_ui_pixels.txt", CountEditorUiPixels(stitched).ToString());
                 }
+
+                long streamedBytes;
+                using (var streamed = ScrollingCapture.StitchStreamingForTest(frames, out streamedBytes))
+                {
+                    streamed.Save(Path.Combine(outputDir, "scroll-editor-streamed.png"), ImageFormat.Png);
+                    WriteResult(outputDir, "scroll_editor_streamed_ui_pixels.txt", CountEditorUiPixels(streamed).ToString());
+                }
             }
+
+            using (var canvas = CreateScrollingCanvas(240, 2100))
+            {
+                var frames = new List<Bitmap>();
+                try
+                {
+                    for (int offset = 0; offset <= 1800; offset += 180)
+                    {
+                        frames.Add(CreateScrollingFrame(canvas, offset));
+                    }
+
+                    long compressedBytes;
+                    using (var streamed = ScrollingCapture.StitchStreamingForTest(frames, out compressedBytes))
+                    {
+                        streamed.Save(Path.Combine(outputDir, "scroll-streamed.png"), ImageFormat.Png);
+                        WriteResult(outputDir, "scroll_streamed_size.txt", streamed.Width + "x" + streamed.Height);
+                        WriteResult(outputDir, "scroll_streamed_compressed_bytes.txt", compressedBytes.ToString());
+                    }
+                }
+                finally
+                {
+                    foreach (var frame in frames)
+                    {
+                        frame.Dispose();
+                    }
+                }
+            }
+
+            WriteResult(outputDir, "scroll_limits.txt",
+                ScrollingCapture.MaxOutputPixelsForTest + "," +
+                ScrollingCapture.MaxBitmapDimensionForTest + "," +
+                ScreenshotHistory.MaxTotalPixelsForTest + "," +
+                ScrollingCapture.CanCreateOutputForTest(1920, 32760) + "," +
+                ScrollingCapture.CanCreateOutputForTest(4096, 20000));
 
             Rectangle previewLayout = CaptureOverlay.CalculateScrollingPreviewBounds(
                 new Rectangle(260, 180, 640, 320),
@@ -558,7 +754,14 @@ namespace PinShotWin
     internal static class ScreenshotHistory
     {
         private const int MaxItems = 10;
+        private const long MaxTotalPixels = 64L * 1024 * 1024;
         private static readonly List<HistoryItem> items = new List<HistoryItem>();
+        private static long totalPixels;
+
+        public static long MaxTotalPixelsForTest
+        {
+            get { return MaxTotalPixels; }
+        }
 
         public static List<HistoryItem> Items
         {
@@ -572,11 +775,13 @@ namespace PinShotWin
                 Image = (Bitmap)bitmap.Clone(),
                 CreatedAt = DateTime.Now
             });
+            totalPixels += bitmap.Width * (long)bitmap.Height;
 
-            while (items.Count > MaxItems)
+            while (items.Count > MaxItems || (totalPixels > MaxTotalPixels && items.Count > 1))
             {
                 var last = items[items.Count - 1];
                 items.RemoveAt(items.Count - 1);
+                totalPixels -= last.Image.Width * (long)last.Image.Height;
                 last.Image.Dispose();
             }
         }
@@ -588,6 +793,33 @@ namespace PinShotWin
                 item.Image.Dispose();
             }
             items.Clear();
+            totalPixels = 0;
+        }
+
+        public static bool RunLimitTest()
+        {
+            Clear();
+            try
+            {
+                using (var image = new Bitmap(3000, 3000, PixelFormat.Format32bppArgb))
+                {
+                    for (int i = 0; i < 8; i++)
+                    {
+                        Add(image);
+                    }
+                }
+
+                long pixels = 0;
+                foreach (var item in items)
+                {
+                    pixels += item.Image.Width * (long)item.Image.Height;
+                }
+                return items.Count == 7 && pixels <= MaxTotalPixels;
+            }
+            finally
+            {
+                Clear();
+            }
         }
     }
 
@@ -763,8 +995,11 @@ namespace PinShotWin
     internal sealed class HotkeyWindow : NativeWindow, IDisposable
     {
         private const int WmHotkey = 0x0312;
-        private const int HotkeyId = 9130;
-        private Keys currentKey = Keys.F1;
+        private const int PrimaryHotkeyId = 9130;
+        private const int SecondaryHotkeyId = 9131;
+        private int currentHotkeyId;
+        private Keys currentKey = Keys.None;
+        private bool registered;
 
         public event EventHandler HotkeyPressed;
 
@@ -773,19 +1008,60 @@ namespace PinShotWin
             CreateHandle(new CreateParams());
         }
 
-        public void Register(Keys key)
+        public Keys CurrentKeyForTest
         {
-            UnregisterHotKey(Handle, HotkeyId);
-            currentKey = key;
-            if (!RegisterHotKey(Handle, HotkeyId, 0, (int)key))
+            get { return currentKey; }
+        }
+
+        public bool IsRegisteredForTest
+        {
+            get { return registered; }
+        }
+
+        public bool TryRegister(Keys key)
+        {
+            if (registered && currentKey == key)
             {
-                MessageBox.Show("快捷键 " + key + " 注册失败，可能被其他程序占用。", "PinShotWin", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return true;
+            }
+
+            int candidateId = !registered || currentHotkeyId == SecondaryHotkeyId
+                ? PrimaryHotkeyId
+                : SecondaryHotkeyId;
+            if (!RegisterHotKey(Handle, candidateId, 0, (int)key))
+            {
+                return false;
+            }
+
+            if (registered)
+            {
+                UnregisterHotKey(Handle, currentHotkeyId);
+            }
+
+            currentHotkeyId = candidateId;
+            currentKey = key;
+            registered = true;
+            return true;
+        }
+
+        public static bool RunRegistrationRollbackTest()
+        {
+            using (var occupied = new HotkeyWindow())
+            using (var subject = new HotkeyWindow())
+            {
+                if (!occupied.TryRegister(Keys.F24) || !subject.TryRegister(Keys.F23))
+                {
+                    return false;
+                }
+
+                bool switched = subject.TryRegister(Keys.F24);
+                return !switched && subject.IsRegisteredForTest && subject.CurrentKeyForTest == Keys.F23;
             }
         }
 
         protected override void WndProc(ref Message m)
         {
-            if (m.Msg == WmHotkey && m.WParam.ToInt32() == HotkeyId)
+            if (m.Msg == WmHotkey && registered && m.WParam.ToInt32() == currentHotkeyId)
             {
                 var handler = HotkeyPressed;
                 if (handler != null)
@@ -800,7 +1076,11 @@ namespace PinShotWin
 
         public void Dispose()
         {
-            UnregisterHotKey(Handle, HotkeyId);
+            if (registered)
+            {
+                UnregisterHotKey(Handle, currentHotkeyId);
+                registered = false;
+            }
             DestroyHandle();
         }
 
@@ -1545,9 +1825,19 @@ namespace PinShotWin
                 Thread.Sleep(180);
 
                 Bitmap stitched = null;
+                bool truncated = false;
+                string captureError = null;
                 try
                 {
-                    stitched = ScrollingCapture.Capture(screenBounds, 30);
+                    stitched = ScrollingCapture.Capture(screenBounds, 30, out truncated);
+                }
+                catch (OutOfMemoryException)
+                {
+                    captureError = "滚动截图过大，内存不足。请缩小截图区域后重试。";
+                }
+                catch (ExternalException)
+                {
+                    captureError = "滚动截图生成失败。请缩小截图区域或减少滚动长度后重试。";
                 }
                 finally
                 {
@@ -1567,6 +1857,19 @@ namespace PinShotWin
                         toolbar.Height);
                     PositionToolbar();
                     Invalidate();
+
+                    if (truncated)
+                    {
+                        MessageBox.Show(this,
+                            "已达到长图安全上限，当前预览保留了已完成的部分。",
+                            "PinShotWin",
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Information);
+                    }
+                }
+                else if (captureError != null)
+                {
+                    MessageBox.Show(this, captureError, "PinShotWin", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
             }
         }
@@ -1803,8 +2106,12 @@ namespace PinShotWin
                     return;
                 }
 
+                if (!ClipboardHelper.TrySetImage(bitmap, this))
+                {
+                    return;
+                }
+
                 RaiseCaptureCompleted(bitmap);
-                Clipboard.SetImage((Bitmap)bitmap.Clone());
             }
             Close();
         }
@@ -2762,7 +3069,7 @@ namespace PinShotWin
 
         private void CopyPinnedImage()
         {
-            Clipboard.SetImage((Bitmap)image.Clone());
+            ClipboardHelper.TrySetImage(image, this);
         }
 
         private void SavePinnedImage()
@@ -2868,62 +3175,306 @@ namespace PinShotWin
     {
         private const int WheelDelta = -720;
         private const int PixelDifferenceThreshold = 45;
+        private const long MaxOutputPixels = 64L * 1024 * 1024;
+        private const int MaxBitmapDimension = 32760;
 
-        public static Bitmap Capture(Rectangle screenBounds, int maxFrames)
+        public static long MaxOutputPixelsForTest
         {
+            get { return MaxOutputPixels; }
+        }
+
+        public static int MaxBitmapDimensionForTest
+        {
+            get { return MaxBitmapDimension; }
+        }
+
+        public static Bitmap Capture(Rectangle screenBounds, int maxFrames, out bool truncated)
+        {
+            truncated = false;
             if (screenBounds.Width < 1 || screenBounds.Height < 1)
             {
                 return null;
             }
 
-            var frames = new List<Bitmap>();
+            var strips = new List<CapturedStrip>();
+            var bootstrapFrames = new List<Bitmap>();
+            Bitmap previous = null;
+            Bitmap current = null;
+            Rectangle contentBounds = Rectangle.Empty;
+            int outputHeight = 0;
+            int acceptedFrames = 0;
             Point oldCursor = Cursor.Position;
             try
             {
                 Cursor.Position = new Point(screenBounds.Left + screenBounds.Width / 2, screenBounds.Top + screenBounds.Height / 2);
 
-                for (int i = 0; i < maxFrames; i++)
+                Thread.Sleep(120);
+                bootstrapFrames.Add(ScreenshotHelper.CaptureVirtualScreen(screenBounds));
+                if (maxFrames <= 1)
+                {
+                    return (Bitmap)bootstrapFrames[0].Clone();
+                }
+
+                int bootstrapTarget = Math.Min(3, maxFrames);
+                for (int i = 1; i < bootstrapTarget; i++)
                 {
                     if (IsEscapePressed())
                     {
                         break;
                     }
 
-                    Thread.Sleep(i == 0 ? 120 : 260);
-                    var frame = ScreenshotHelper.CaptureVirtualScreen(screenBounds);
-                    if (frames.Count > 0 &&
-                        (LooksSame(frames[frames.Count - 1], frame) ||
-                         !HasMeaningfulVerticalScroll(frames[frames.Count - 1], frame)))
+                    SendWheel(WheelDelta);
+                    Application.DoEvents();
+                    Thread.Sleep(260);
+                    current = ScreenshotHelper.CaptureVirtualScreen(screenBounds);
+                    if (LooksSame(bootstrapFrames[bootstrapFrames.Count - 1], current))
                     {
-                        frame.Dispose();
+                        break;
+                    }
+                    bootstrapFrames.Add(current);
+                    current = null;
+                }
+
+                if (bootstrapFrames.Count < 2)
+                {
+                    return (Bitmap)bootstrapFrames[0].Clone();
+                }
+
+                contentBounds = DetectContentBounds(bootstrapFrames);
+                if (contentBounds.IsEmpty)
+                {
+                    return (Bitmap)bootstrapFrames[0].Clone();
+                }
+
+                strips.Add(CapturedStrip.Create(bootstrapFrames[0], contentBounds));
+                outputHeight = contentBounds.Height;
+                acceptedFrames = 1;
+                for (int i = 1; i < bootstrapFrames.Count; i++)
+                {
+                    VerticalMatch match = FindVerticalMatch(bootstrapFrames[i - 1], bootstrapFrames[i], contentBounds);
+                    if (!match.IsReliable || match.Shift <= 0)
+                    {
+                        return CombineStrips(strips, contentBounds.Width, outputHeight);
+                    }
+
+                    int nextHeight = outputHeight + match.Shift;
+                    if (!CanCreateOutput(contentBounds.Width, nextHeight))
+                    {
+                        truncated = true;
                         break;
                     }
 
-                    frames.Add(frame);
+                    int overlap = contentBounds.Height - match.Shift;
+                    var source = new Rectangle(
+                        contentBounds.Left,
+                        contentBounds.Top + overlap,
+                        contentBounds.Width,
+                        match.Shift);
+                    strips.Add(CapturedStrip.Create(bootstrapFrames[i], source));
+                    outputHeight = nextHeight;
+                    acceptedFrames++;
+                }
+
+                previous = bootstrapFrames[bootstrapFrames.Count - 1];
+                bootstrapFrames.RemoveAt(bootstrapFrames.Count - 1);
+                foreach (var frame in bootstrapFrames)
+                {
+                    frame.Dispose();
+                }
+                bootstrapFrames.Clear();
+
+                for (int i = acceptedFrames; i < maxFrames; i++)
+                {
+                    if (IsEscapePressed())
+                    {
+                        break;
+                    }
+
                     SendWheel(WheelDelta);
                     Application.DoEvents();
+                    Thread.Sleep(260);
+                    current = ScreenshotHelper.CaptureVirtualScreen(screenBounds);
+                    if (LooksSame(previous, current))
+                    {
+                        break;
+                    }
+
+                    VerticalMatch match = FindVerticalMatch(previous, current, contentBounds);
+                    if (!match.IsReliable || match.Shift <= 0)
+                    {
+                        break;
+                    }
+
+                    int nextHeight = outputHeight + match.Shift;
+                    if (!CanCreateOutput(contentBounds.Width, nextHeight))
+                    {
+                        truncated = true;
+                        break;
+                    }
+
+                    int overlap = contentBounds.Height - match.Shift;
+                    var source = new Rectangle(
+                        contentBounds.Left,
+                        contentBounds.Top + overlap,
+                        contentBounds.Width,
+                        match.Shift);
+                    strips.Add(CapturedStrip.Create(current, source));
+                    outputHeight = nextHeight;
+                    acceptedFrames++;
+
+                    previous.Dispose();
+                    previous = current;
+                    current = null;
                 }
 
-                if (frames.Count == 0)
+                if (acceptedFrames >= maxFrames)
                 {
-                    return null;
+                    truncated = true;
                 }
 
-                return Stitch(frames);
+                return CombineStrips(strips, contentBounds.Width, outputHeight);
             }
             finally
             {
                 Cursor.Position = oldCursor;
-                foreach (var frame in frames)
+                if (current != null)
+                {
+                    current.Dispose();
+                }
+                if (previous != null)
+                {
+                    previous.Dispose();
+                }
+                foreach (var frame in bootstrapFrames)
                 {
                     frame.Dispose();
                 }
+                foreach (var strip in strips)
+                {
+                    strip.Dispose();
+                }
             }
+        }
+
+        private static bool CanCreateOutput(int width, int height)
+        {
+            return width > 0 && height > 0 &&
+                width <= MaxBitmapDimension && height <= MaxBitmapDimension &&
+                width * (long)height <= MaxOutputPixels;
+        }
+
+        public static bool CanCreateOutputForTest(int width, int height)
+        {
+            return CanCreateOutput(width, height);
+        }
+
+        private static Bitmap CombineStrips(IList<CapturedStrip> strips, int width, int height)
+        {
+            var output = new Bitmap(width, height, PixelFormat.Format32bppArgb);
+            using (var g = Graphics.FromImage(output))
+            {
+                g.Clear(Color.Transparent);
+                int destinationY = 0;
+                foreach (var strip in strips)
+                {
+                    strip.Draw(g, destinationY);
+                    destinationY += strip.Height;
+                }
+            }
+            return output;
+        }
+
+        private static Rectangle DetectContentBounds(IList<Bitmap> frames)
+        {
+            Rectangle roughBounds = DetectScrollingBounds(frames);
+            if (roughBounds.IsEmpty)
+            {
+                return Rectangle.Empty;
+            }
+
+            var matches = new List<VerticalMatch>();
+            for (int i = 1; i < frames.Count; i++)
+            {
+                matches.Add(FindVerticalMatch(frames[i - 1], frames[i], roughBounds));
+            }
+            return RefineHorizontalBounds(frames, roughBounds, matches);
         }
 
         public static Bitmap StitchForTest(IList<Bitmap> frames)
         {
             return Stitch(frames);
+        }
+
+        public static Bitmap StitchStreamingForTest(IList<Bitmap> frames, out long compressedBytes)
+        {
+            compressedBytes = 0;
+            if (frames.Count == 0)
+            {
+                return null;
+            }
+            if (frames.Count == 1)
+            {
+                return (Bitmap)frames[0].Clone();
+            }
+
+            int bootstrapCount = Math.Min(3, frames.Count);
+            var bootstrap = new List<Bitmap>();
+            for (int i = 0; i < bootstrapCount; i++)
+            {
+                bootstrap.Add(frames[i]);
+            }
+            Rectangle contentBounds = DetectContentBounds(bootstrap);
+            if (contentBounds.IsEmpty)
+            {
+                return (Bitmap)frames[0].Clone();
+            }
+            int outputHeight = 0;
+            var strips = new List<CapturedStrip>();
+            try
+            {
+                strips.Add(CapturedStrip.Create(frames[0], contentBounds));
+                outputHeight = contentBounds.Height;
+                for (int i = 1; i < frames.Count; i++)
+                {
+                    VerticalMatch match = FindVerticalMatch(frames[i - 1], frames[i], contentBounds);
+                    if (!match.IsReliable || match.Shift <= 0)
+                    {
+                        break;
+                    }
+
+                    int nextHeight = outputHeight + match.Shift;
+                    if (!CanCreateOutput(contentBounds.Width, nextHeight))
+                    {
+                        break;
+                    }
+
+                    int overlap = contentBounds.Height - match.Shift;
+                    strips.Add(CapturedStrip.Create(frames[i], new Rectangle(
+                        contentBounds.Left,
+                        contentBounds.Top + overlap,
+                        contentBounds.Width,
+                        match.Shift)));
+                    outputHeight = nextHeight;
+                }
+
+                if (strips.Count == 0)
+                {
+                    return (Bitmap)frames[0].Clone();
+                }
+
+                foreach (var strip in strips)
+                {
+                    compressedBytes += strip.CompressedBytes;
+                }
+                return CombineStrips(strips, contentBounds.Width, outputHeight);
+            }
+            finally
+            {
+                foreach (var strip in strips)
+                {
+                    strip.Dispose();
+                }
+            }
         }
 
         public static string GetDiagnosticsForTest(IList<Bitmap> frames)
@@ -3075,31 +3626,30 @@ namespace PinShotWin
             int blockWidth = Math.Max(6, Math.Min(12, roughBounds.Width / 28));
             int blockCount = (roughBounds.Width + blockWidth - 1) / blockWidth;
             var state = new sbyte[blockCount];
+            var differences = new long[blockCount];
+            var texturedSamples = new int[blockCount];
+            var matchedSamples = new int[blockCount];
 
-            for (int block = 0; block < blockCount; block++)
+            for (int pair = 0; pair < matches.Count; pair++)
             {
-                int left = roughBounds.Left + block * blockWidth;
-                int right = Math.Min(roughBounds.Right, left + blockWidth);
-                long difference = 0;
-                int textured = 0;
-                int matched = 0;
-
-                for (int pair = 0; pair < matches.Count; pair++)
+                VerticalMatch match = matches[pair];
+                if (!match.IsReliable || match.Shift <= 0)
                 {
-                    VerticalMatch match = matches[pair];
-                    if (!match.IsReliable || match.Shift <= 0)
-                    {
-                        continue;
-                    }
+                    continue;
+                }
 
-                    using (var a = new PixelBuffer(frames[pair]))
-                    using (var b = new PixelBuffer(frames[pair + 1]))
+                using (var a = new PixelBuffer(frames[pair]))
+                using (var b = new PixelBuffer(frames[pair + 1]))
+                {
+                    int overlap = roughBounds.Height - match.Shift;
+                    for (int y = 2; y < overlap - 2; y += 3)
                     {
-                        int overlap = roughBounds.Height - match.Shift;
-                        for (int y = 2; y < overlap - 2; y += 3)
+                        int previousY = roughBounds.Top + match.Shift + y;
+                        int currentY = roughBounds.Top + y;
+                        for (int block = 0; block < blockCount; block++)
                         {
-                            int previousY = roughBounds.Top + match.Shift + y;
-                            int currentY = roughBounds.Top + y;
+                            int left = roughBounds.Left + block * blockWidth;
+                            int right = Math.Min(roughBounds.Right, left + blockWidth);
                             for (int x = left + 1; x < right - 1; x += 2)
                             {
                                 if (Math.Max(a.Texture(x, previousY), b.Texture(x, currentY)) < 18)
@@ -3108,22 +3658,25 @@ namespace PinShotWin
                                 }
 
                                 int pixelDifference = a.Difference(b, x, previousY, x, currentY);
-                                difference += pixelDifference;
-                                textured++;
+                                differences[block] += pixelDifference;
+                                texturedSamples[block]++;
                                 if (pixelDifference <= 42)
                                 {
-                                    matched++;
+                                    matchedSamples[block]++;
                                 }
                             }
                         }
                     }
                 }
+            }
 
-                int minimumEvidence = Math.Max(28, matches.Count * 12);
-                if (textured >= minimumEvidence)
+            for (int block = 0; block < blockCount; block++)
+            {
+                int minimumEvidence = Math.Max(10, matches.Count * 8);
+                if (texturedSamples[block] >= minimumEvidence)
                 {
-                    double average = difference / (double)textured;
-                    double ratio = matched / (double)textured;
+                    double average = differences[block] / (double)texturedSamples[block];
+                    double ratio = matchedSamples[block] / (double)texturedSamples[block];
                     state[block] = average <= 42 && ratio >= 0.58 ? (sbyte)1 : (sbyte)-1;
                 }
             }
@@ -3297,25 +3850,51 @@ namespace PinShotWin
             };
         }
 
-        private static bool HasMeaningfulVerticalScroll(Bitmap previous, Bitmap current)
-        {
-            var pair = new List<Bitmap> { previous, current };
-            Rectangle bounds = DetectScrollingBounds(pair);
-            if (bounds.IsEmpty)
-            {
-                return false;
-            }
-
-            VerticalMatch match = FindVerticalMatch(previous, current, bounds);
-            return match.IsReliable && match.Shift > 0;
-        }
-
         private struct VerticalMatch
         {
             public int Shift;
             public double Score;
             public int Samples;
             public bool IsReliable;
+        }
+
+        private sealed class CapturedStrip : IDisposable
+        {
+            private readonly MemoryStream data;
+
+            public int Height { get; private set; }
+            public long CompressedBytes { get { return data.Length; } }
+
+            private CapturedStrip(MemoryStream data, int height)
+            {
+                this.data = data;
+                Height = height;
+            }
+
+            public static CapturedStrip Create(Bitmap source, Rectangle bounds)
+            {
+                var stream = new MemoryStream();
+                using (var strip = source.Clone(bounds, PixelFormat.Format32bppArgb))
+                {
+                    strip.Save(stream, ImageFormat.Png);
+                }
+                stream.Position = 0;
+                return new CapturedStrip(stream, bounds.Height);
+            }
+
+            public void Draw(Graphics graphics, int destinationY)
+            {
+                data.Position = 0;
+                using (var image = Image.FromStream(data, false, false))
+                {
+                    graphics.DrawImageUnscaled(image, 0, destinationY);
+                }
+            }
+
+            public void Dispose()
+            {
+                data.Dispose();
+            }
         }
 
         private static bool LooksSame(Bitmap a, Bitmap b)

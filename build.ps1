@@ -35,6 +35,7 @@ using System.Runtime.InteropServices;
     /optimize+ `
     /utf8output `
     /win32icon:"$iconPath" `
+    /win32manifest:"$PSScriptRoot\app.manifest" `
     /out:"$outDir\PinShotWin.exe" `
     /reference:System.dll `
     /reference:System.Core.dll `
