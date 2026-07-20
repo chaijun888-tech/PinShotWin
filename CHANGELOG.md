@@ -14,6 +14,7 @@
 - Preserved annotation order between preview and final output.
 - Made Escape cancel active text editing before closing the capture overlay.
 - Improved diagonal arrow annotations with a shared antialiased vector arrow for preview and final output.
+- Hid the capture toolbar while moving or resizing the selection, then restored it after release to prevent flicker.
 
 ## 0.1.0 - 2026-07-09
 

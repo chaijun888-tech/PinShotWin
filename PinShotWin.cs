@@ -849,6 +849,7 @@ namespace PinShotWin
         private SelectionDragMode previewDragMode = SelectionDragMode.None;
         private Rectangle previewDragStartBounds;
         private Point previewDragStartPoint;
+        private Rectangle hiddenToolbarBounds;
         private readonly List<Annotation> annotations = new List<Annotation>();
         private AnnotationTool activeTool = AnnotationTool.None;
         private bool annotationDragging;
@@ -898,9 +899,8 @@ namespace PinShotWin
                 Application.DoEvents();
                 overlay.selectedBounds = new Rectangle(300, 220, 750, 500);
                 overlay.EnterPreview();
-                overlay.previewDragMode = SelectionDragMode.Move;
-                overlay.previewDragStartPoint = new Point(650, 450);
-                overlay.previewDragStartBounds = overlay.selectedBounds;
+                overlay.BeginSelectionAdjustment(new Point(650, 450), SelectionDragMode.Move);
+                bool hiddenDuringDrag = !overlay.toolbar.Visible;
 
                 var stopwatch = System.Diagnostics.Stopwatch.StartNew();
                 for (int i = 1; i <= 90; i++)
@@ -910,13 +910,16 @@ namespace PinShotWin
                     overlay.Update();
                 }
                 stopwatch.Stop();
+                overlay.EndSelectionAdjustment(new Point(950, 450));
 
                 double fps = 90000.0 / Math.Max(1, stopwatch.ElapsedMilliseconds);
                 int finalSelectionX = overlay.GetSelectionXForTest();
                 File.WriteAllText(outputPath,
                     "elapsed_ms=" + stopwatch.ElapsedMilliseconds + Environment.NewLine +
                     "fps=" + fps.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + Environment.NewLine +
-                    "selection_x=" + finalSelectionX,
+                    "selection_x=" + finalSelectionX + Environment.NewLine +
+                    "toolbar_hidden_during_drag=" + hiddenDuringDrag + Environment.NewLine +
+                    "toolbar_visible_after_drag=" + overlay.toolbar.Visible,
                     Encoding.UTF8);
             }
         }
@@ -1049,9 +1052,7 @@ namespace PinShotWin
                         previewDragMode = HitTestSelection(e.Location);
                         if (previewDragMode != SelectionDragMode.None)
                         {
-                            previewDragStartPoint = e.Location;
-                            previewDragStartBounds = selectedBounds;
-                            Capture = true;
+                            BeginSelectionAdjustment(e.Location, previewDragMode);
                         }
                     }
                 }
@@ -1085,10 +1086,8 @@ namespace PinShotWin
                 else if (previewDragMode != SelectionDragMode.None)
                 {
                     var oldBounds = selectedBounds;
-                    var oldToolbarBounds = toolbar.Bounds;
                     selectedBounds = BuildAdjustedBounds(previewDragStartBounds, previewDragStartPoint, e.Location, previewDragMode);
-                    PositionToolbar();
-                    InvalidateSelectionChange(oldBounds, selectedBounds, oldToolbarBounds, toolbar.Bounds);
+                    InvalidateSelectionChange(oldBounds, selectedBounds, Rectangle.Empty, Rectangle.Empty);
                 }
                 else
                 {
@@ -1124,9 +1123,7 @@ namespace PinShotWin
                     }
                     else
                     {
-                        previewDragMode = SelectionDragMode.None;
-                        Capture = false;
-                        Cursor = CursorForMode(HitTestSelection(e.Location));
+                        EndSelectionAdjustment(e.Location);
                     }
                 }
 
@@ -1234,10 +1231,32 @@ namespace PinShotWin
                 AddSelectionFrame(dirty, newBounds);
                 dirty.Union(GetSelectionSizeBounds(oldBounds));
                 dirty.Union(GetSelectionSizeBounds(newBounds));
-                dirty.Union(oldToolbarBounds);
-                dirty.Union(newToolbarBounds);
+                if (!oldToolbarBounds.IsEmpty) dirty.Union(oldToolbarBounds);
+                if (!newToolbarBounds.IsEmpty) dirty.Union(newToolbarBounds);
                 Invalidate(dirty);
             }
+        }
+
+        private void BeginSelectionAdjustment(Point startPoint, SelectionDragMode mode)
+        {
+            previewDragMode = mode;
+            previewDragStartPoint = startPoint;
+            previewDragStartBounds = selectedBounds;
+            hiddenToolbarBounds = toolbar.Bounds;
+            toolbar.Visible = false;
+            Invalidate(hiddenToolbarBounds);
+            Capture = true;
+        }
+
+        private void EndSelectionAdjustment(Point currentPoint)
+        {
+            previewDragMode = SelectionDragMode.None;
+            Capture = false;
+            PositionToolbar();
+            toolbar.Visible = true;
+            Invalidate(hiddenToolbarBounds);
+            hiddenToolbarBounds = Rectangle.Empty;
+            Cursor = CursorForMode(HitTestSelection(currentPoint));
         }
 
         private static void AddSelectionFrame(Region dirty, Rectangle bounds)

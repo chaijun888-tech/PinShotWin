@@ -96,6 +96,8 @@ if ($IncludeUi) {
     $dragFps = [double]$dragValues['fps']
     Assert-True ($dragFps -ge 50) "Preview drag performance too low: $dragFps FPS"
     Assert-True ([int]$dragValues['selection_x'] -eq 600) "Preview drag did not reach the expected location"
+    Assert-True ($dragValues['toolbar_hidden_during_drag'] -eq 'True') "Toolbar remained visible during selection adjustment"
+    Assert-True ($dragValues['toolbar_visible_after_drag'] -eq 'True') "Toolbar did not return after selection adjustment"
 
     $annotationPath = Join-Path $uiOut "annotation.png"
     $scrollPath = Join-Path $uiOut "scroll.png"
