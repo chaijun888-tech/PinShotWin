@@ -273,6 +273,30 @@ namespace PinShotWin
                 }
             }
 
+            using (var canvas = CreateEditorScrollingCanvas(270, 660))
+            using (var a = CreateEditorScrollingFrame(canvas, 0, 0))
+            using (var b = CreateEditorScrollingFrame(canvas, 190, 0))
+            using (var c = CreateEditorScrollingFrame(canvas, 380, 0))
+            using (var settled = CreateEditorScrollingFrame(canvas, 380, 3))
+            {
+                var frames = new List<Bitmap> { a, b, c, settled };
+                using (var stitched = ScrollingCapture.StitchForTest(frames))
+                {
+                    stitched.Save(Path.Combine(outputDir, "scroll-editor.png"), ImageFormat.Png);
+                    WriteResult(outputDir, "scroll_editor_size.txt", stitched.Width + "x" + stitched.Height);
+                    WriteResult(outputDir, "scroll_editor_diagnostics.txt", ScrollingCapture.GetDiagnosticsForTest(frames));
+                    WriteResult(outputDir, "scroll_editor_ui_pixels.txt", CountEditorUiPixels(stitched).ToString());
+                }
+            }
+
+            Rectangle previewLayout = CaptureOverlay.CalculateScrollingPreviewBounds(
+                new Rectangle(260, 180, 640, 320),
+                new Size(640, 1280),
+                new Rectangle(0, 0, 1600, 900),
+                44);
+            WriteResult(outputDir, "scroll_preview_layout.txt",
+                previewLayout.X + "," + previewLayout.Y + "," + previewLayout.Width + "," + previewLayout.Height);
+
             using (var source = new Bitmap(100, 80, PixelFormat.Format32bppArgb))
             using (var g = Graphics.FromImage(source))
             {
@@ -361,6 +385,75 @@ namespace PinShotWin
             return frame;
         }
 
+        private static Bitmap CreateEditorScrollingCanvas(int width, int height)
+        {
+            var bitmap = new Bitmap(width, height, PixelFormat.Format32bppArgb);
+            using (var g = Graphics.FromImage(bitmap))
+            {
+                g.Clear(Color.FromArgb(24, 26, 29));
+                using (var lineBrush = new SolidBrush(Color.FromArgb(91, 184, 255)))
+                using (var accentBrush = new SolidBrush(Color.FromArgb(218, 224, 231)))
+                {
+                    for (int line = 0; line < 30; line++)
+                    {
+                        int y = 8 + line * 20;
+                        if (y >= 260 && y < 380)
+                        {
+                            continue;
+                        }
+
+                        int indent = 12 + (line % 4) * 11;
+                        int length = 70 + (line * 37) % 150;
+                        g.FillRectangle(line % 3 == 0 ? accentBrush : lineBrush, indent, y, length, 3);
+                        g.FillRectangle(lineBrush, indent + 8, y + 6, Math.Max(24, length / 2), 2);
+                    }
+                }
+            }
+            return bitmap;
+        }
+
+        private static Bitmap CreateEditorScrollingFrame(Bitmap canvas, int offset, int thumbNudge)
+        {
+            const int leftPanelWidth = 45;
+            const int contentWidth = 270;
+            const int miniMapWidth = 30;
+            const int scrollBarWidth = 15;
+            const int viewportTop = 20;
+            const int viewportHeight = 280;
+            var frame = new Bitmap(leftPanelWidth + contentWidth + miniMapWidth + scrollBarWidth, 320, PixelFormat.Format32bppArgb);
+            using (var g = Graphics.FromImage(frame))
+            {
+                g.Clear(Color.FromArgb(36, 39, 44));
+                using (var panelBrush = new SolidBrush(Color.FromArgb(44, 48, 55)))
+                using (var mapBrush = new SolidBrush(Color.FromArgb(28, 31, 35)))
+                using (var mapLineBrush = new SolidBrush(Color.FromArgb(77, 105, 126)))
+                using (var trackBrush = new SolidBrush(Color.FromArgb(30, 32, 35)))
+                using (var thumbBrush = new SolidBrush(Color.FromArgb(104, 108, 112)))
+                {
+                    g.FillRectangle(panelBrush, 0, viewportTop, leftPanelWidth, viewportHeight);
+                    g.DrawImage(canvas,
+                        new Rectangle(leftPanelWidth, viewportTop, contentWidth, viewportHeight),
+                        new Rectangle(0, offset, contentWidth, viewportHeight),
+                        GraphicsUnit.Pixel);
+
+                    int mapLeft = leftPanelWidth + contentWidth;
+                    g.FillRectangle(mapBrush, mapLeft, viewportTop, miniMapWidth, viewportHeight);
+                    for (int y = viewportTop + 4; y < viewportTop + viewportHeight - 3; y += 7)
+                    {
+                        int sourceBand = (offset / 5 + y * 3) % 97;
+                        g.FillRectangle(mapLineBrush, mapLeft + 3, y, 8 + sourceBand % 18, 2);
+                    }
+
+                    int barLeft = mapLeft + miniMapWidth;
+                    g.FillRectangle(trackBrush, barLeft, viewportTop, scrollBarWidth, viewportHeight);
+                    int thumbTravel = viewportHeight - 72;
+                    int thumbTop = viewportTop + (int)Math.Round(offset / 380.0 * thumbTravel) + thumbNudge;
+                    g.FillRectangle(thumbBrush, barLeft + 2, thumbTop, scrollBarWidth - 3, 72);
+                }
+            }
+            return frame;
+        }
+
         private static int CountRedPixels(Bitmap bitmap)
         {
             int count = 0;
@@ -370,6 +463,26 @@ namespace PinShotWin
                 {
                     Color color = bitmap.GetPixel(x, y);
                     if (color.R > 180 && color.G < 100 && color.B < 100)
+                    {
+                        count++;
+                    }
+                }
+            }
+            return count;
+        }
+
+        private static int CountEditorUiPixels(Bitmap bitmap)
+        {
+            int count = 0;
+            for (int y = 0; y < bitmap.Height; y++)
+            {
+                for (int x = 0; x < bitmap.Width; x++)
+                {
+                    Color color = bitmap.GetPixel(x, y);
+                    bool fixedPanel = color.R == 44 && color.G == 48 && color.B == 55;
+                    bool miniMap = color.R == 77 && color.G == 105 && color.B == 126;
+                    bool scrollThumb = color.R == 104 && color.G == 108 && color.B == 112;
+                    if (fixedPanel || miniMap || scrollThumb)
                     {
                         count++;
                     }
@@ -924,6 +1037,30 @@ namespace PinShotWin
             }
         }
 
+        internal static Rectangle CalculateScrollingPreviewBounds(
+            Rectangle previousBounds,
+            Size imageSize,
+            Rectangle clientBounds,
+            int toolbarHeight)
+        {
+            const int margin = 12;
+            const int toolbarGap = 8;
+            int availableWidth = Math.Max(1, clientBounds.Width - margin * 2);
+            int availableHeight = Math.Max(1, clientBounds.Height - margin * 2 - toolbarHeight - toolbarGap);
+            double scale = Math.Min(1.0, Math.Min(
+                availableWidth / (double)Math.Max(1, imageSize.Width),
+                availableHeight / (double)Math.Max(1, imageSize.Height)));
+            int width = Math.Max(1, (int)Math.Round(imageSize.Width * scale));
+            int height = Math.Max(1, (int)Math.Round(imageSize.Height * scale));
+            int centerX = previousBounds.Left + previousBounds.Width / 2;
+            int centerY = previousBounds.Top + previousBounds.Height / 2;
+            int left = centerX - width / 2;
+            int top = centerY - height / 2;
+            left = Math.Max(clientBounds.Left + margin, Math.Min(clientBounds.Right - margin - width, left));
+            top = Math.Max(clientBounds.Top + margin, Math.Min(clientBounds.Bottom - margin - toolbarHeight - toolbarGap - height, top));
+            return new Rectangle(left, top, width, height);
+        }
+
         private int GetSelectionXForTest()
         {
             return selectedBounds.X;
@@ -1389,7 +1526,7 @@ namespace PinShotWin
         private void StartScrollingCapture()
         {
             CommitTextEditor();
-            if (!previewMode || selectedBounds.Width < 10 || selectedBounds.Height < 10)
+            if (!previewMode || previewBitmap != null || selectedBounds.Width < 10 || selectedBounds.Height < 10)
             {
                 return;
             }
@@ -1423,6 +1560,12 @@ namespace PinShotWin
                 {
                     annotations.Clear();
                     SetPreviewBitmap(stitched);
+                    selectedBounds = CalculateScrollingPreviewBounds(
+                        selectedBounds,
+                        stitched.Size,
+                        ClientRectangle,
+                        toolbar.Height);
+                    PositionToolbar();
                     Invalidate();
                 }
             }
@@ -2724,7 +2867,6 @@ namespace PinShotWin
     internal static class ScrollingCapture
     {
         private const int WheelDelta = -720;
-        private const int DefaultOverlap = 80;
         private const int PixelDifferenceThreshold = 45;
 
         public static Bitmap Capture(Rectangle screenBounds, int maxFrames)
@@ -2749,7 +2891,9 @@ namespace PinShotWin
 
                     Thread.Sleep(i == 0 ? 120 : 260);
                     var frame = ScreenshotHelper.CaptureVirtualScreen(screenBounds);
-                    if (frames.Count > 0 && LooksSame(frames[frames.Count - 1], frame))
+                    if (frames.Count > 0 &&
+                        (LooksSame(frames[frames.Count - 1], frame) ||
+                         !HasMeaningfulVerticalScroll(frames[frames.Count - 1], frame)))
                     {
                         frame.Dispose();
                         break;
@@ -2782,6 +2926,18 @@ namespace PinShotWin
             return Stitch(frames);
         }
 
+        public static string GetDiagnosticsForTest(IList<Bitmap> frames)
+        {
+            Rectangle bounds = DetectScrollingBounds(frames);
+            var values = new List<string>();
+            for (int i = 1; i < frames.Count; i++)
+            {
+                VerticalMatch match = FindVerticalMatch(frames[i - 1], frames[i], bounds);
+                values.Add(match.Shift + ":" + match.Score.ToString("0.0") + ":" + match.Samples + ":" + match.IsReliable);
+            }
+            return bounds.ToString() + Environment.NewLine + string.Join(Environment.NewLine, values.ToArray());
+        }
+
         private static Bitmap Stitch(IList<Bitmap> frames)
         {
             if (frames.Count == 0)
@@ -2789,14 +2945,34 @@ namespace PinShotWin
                 return null;
             }
 
-            Rectangle contentBounds = DetectScrollingBounds(frames);
+            Rectangle roughBounds = DetectScrollingBounds(frames);
+            if (roughBounds.IsEmpty)
+            {
+                return frames[0].Clone(new Rectangle(0, 0, frames[0].Width, frames[0].Height), PixelFormat.Format32bppArgb);
+            }
+
+            var roughMatches = new List<VerticalMatch>();
+            for (int i = 1; i < frames.Count; i++)
+            {
+                roughMatches.Add(FindVerticalMatch(frames[i - 1], frames[i], roughBounds));
+            }
+
+            Rectangle contentBounds = RefineHorizontalBounds(frames, roughBounds, roughMatches);
             var shifts = new List<int>();
+            var acceptedFrames = new List<int> { 0 };
             int height = contentBounds.Height;
             for (int i = 1; i < frames.Count; i++)
             {
-                int shift = FindVerticalShift(frames[i - 1], frames[i], contentBounds);
-                shifts.Add(shift);
-                height += shift;
+                int previousIndex = acceptedFrames[acceptedFrames.Count - 1];
+                VerticalMatch match = FindVerticalMatch(frames[previousIndex], frames[i], contentBounds);
+                if (!match.IsReliable || match.Shift <= 0)
+                {
+                    continue;
+                }
+
+                acceptedFrames.Add(i);
+                shifts.Add(match.Shift);
+                height += match.Shift;
             }
 
             var output = new Bitmap(contentBounds.Width, height, PixelFormat.Format32bppArgb);
@@ -2804,7 +2980,7 @@ namespace PinShotWin
             {
                 g.Clear(Color.Transparent);
                 int destinationY = 0;
-                for (int i = 0; i < frames.Count; i++)
+                for (int i = 0; i < acceptedFrames.Count; i++)
                 {
                     int shift = i == 0 ? contentBounds.Height : shifts[i - 1];
                     int overlap = contentBounds.Height - shift;
@@ -2812,7 +2988,7 @@ namespace PinShotWin
                     int sourceHeight = i == 0 ? contentBounds.Height : shift;
                     var source = new Rectangle(contentBounds.Left, sourceY, contentBounds.Width, sourceHeight);
                     var dest = new Rectangle(0, destinationY, contentBounds.Width, sourceHeight);
-                    g.DrawImage(frames[i], dest, source, GraphicsUnit.Pixel);
+                    g.DrawImage(frames[acceptedFrames[i]], dest, source, GraphicsUnit.Pixel);
                     destinationY += sourceHeight;
                 }
             }
@@ -2826,11 +3002,17 @@ namespace PinShotWin
             int minY = frames[0].Height;
             int maxX = -1;
             int maxY = -1;
-            int changed = 0;
+            int acceptedPairs = 0;
             int comparisons = Math.Min(frames.Count - 1, 4);
+            var full = new Rectangle(0, 0, frames[0].Width, frames[0].Height);
 
             for (int i = 0; i < comparisons; i++)
             {
+                int pairMinX = full.Width;
+                int pairMinY = full.Height;
+                int pairMaxX = -1;
+                int pairMaxY = -1;
+                int pairChanged = 0;
                 using (var a = new PixelBuffer(frames[i]))
                 using (var b = new PixelBuffer(frames[i + 1]))
                 {
@@ -2843,83 +3025,297 @@ namespace PinShotWin
                                 continue;
                             }
 
-                            minX = Math.Min(minX, x);
-                            minY = Math.Min(minY, y);
-                            maxX = Math.Max(maxX, x);
-                            maxY = Math.Max(maxY, y);
-                            changed++;
+                            pairMinX = Math.Min(pairMinX, x);
+                            pairMinY = Math.Min(pairMinY, y);
+                            pairMaxX = Math.Max(pairMaxX, x);
+                            pairMaxY = Math.Max(pairMaxY, y);
+                            pairChanged++;
                         }
                     }
                 }
+
+                int pairWidth = pairMaxX >= pairMinX ? pairMaxX - pairMinX + 1 : 0;
+                int pairHeight = pairMaxY >= pairMinY ? pairMaxY - pairMinY + 1 : 0;
+                if (pairChanged < 24 || pairWidth < full.Width / 4 || pairHeight < full.Height / 3)
+                {
+                    continue;
+                }
+
+                minX = Math.Min(minX, pairMinX);
+                minY = Math.Min(minY, pairMinY);
+                maxX = Math.Max(maxX, pairMaxX);
+                maxY = Math.Max(maxY, pairMaxY);
+                acceptedPairs++;
             }
 
-            var full = new Rectangle(0, 0, frames[0].Width, frames[0].Height);
-            if (changed < 24 || maxX <= minX || maxY <= minY)
+            if (acceptedPairs == 0 || maxX <= minX || maxY <= minY)
             {
-                return full;
+                return Rectangle.Empty;
             }
 
             var detected = Rectangle.FromLTRB(
-                Math.Max(0, minX - 6),
-                Math.Max(0, minY - 6),
-                Math.Min(full.Right, maxX + 9),
-                Math.Min(full.Bottom, maxY + 9));
+                Math.Max(0, minX - 12),
+                Math.Max(0, minY - 1),
+                Math.Min(full.Right, maxX + 13),
+                Math.Min(full.Bottom, maxY + 3));
 
             if (detected.Width < full.Width / 4 || detected.Height < full.Height / 3)
             {
-                return full;
+                return Rectangle.Empty;
             }
 
             return detected;
         }
 
-        private static int FindVerticalShift(Bitmap previous, Bitmap current, Rectangle bounds)
+        private static Rectangle RefineHorizontalBounds(
+            IList<Bitmap> frames,
+            Rectangle roughBounds,
+            IList<VerticalMatch> matches)
         {
-            int minShift = Math.Max(12, bounds.Height / 12);
-            int maxShift = Math.Max(minShift, bounds.Height - Math.Max(24, bounds.Height / 10));
-            int bestShift = Math.Max(1, bounds.Height - Math.Min(DefaultOverlap, bounds.Height / 4));
-            double bestScore = double.MaxValue;
+            int blockWidth = Math.Max(6, Math.Min(12, roughBounds.Width / 28));
+            int blockCount = (roughBounds.Width + blockWidth - 1) / blockWidth;
+            var state = new sbyte[blockCount];
 
-            using (var a = new PixelBuffer(previous))
-            using (var b = new PixelBuffer(current))
+            for (int block = 0; block < blockCount; block++)
             {
-                int xStep = Math.Max(2, bounds.Width / 24);
-                for (int shift = minShift; shift <= maxShift; shift += 2)
+                int left = roughBounds.Left + block * blockWidth;
+                int right = Math.Min(roughBounds.Right, left + blockWidth);
+                long difference = 0;
+                int textured = 0;
+                int matched = 0;
+
+                for (int pair = 0; pair < matches.Count; pair++)
                 {
-                    int overlap = bounds.Height - shift;
-                    int yStep = Math.Max(2, overlap / 20);
-                    long difference = 0;
-                    int samples = 0;
-
-                    for (int y = 4; y < overlap - 4; y += yStep)
-                    {
-                        for (int x = bounds.Left + 4; x < bounds.Right - 4; x += xStep)
-                        {
-                            difference += a.Difference(b, x, bounds.Top + shift + y, x, bounds.Top + y);
-                            samples++;
-                        }
-                    }
-
-                    if (samples == 0)
+                    VerticalMatch match = matches[pair];
+                    if (!match.IsReliable || match.Shift <= 0)
                     {
                         continue;
                     }
 
-                    double score = difference / (double)samples;
-                    if (score < bestScore)
+                    using (var a = new PixelBuffer(frames[pair]))
+                    using (var b = new PixelBuffer(frames[pair + 1]))
                     {
-                        bestScore = score;
+                        int overlap = roughBounds.Height - match.Shift;
+                        for (int y = 2; y < overlap - 2; y += 3)
+                        {
+                            int previousY = roughBounds.Top + match.Shift + y;
+                            int currentY = roughBounds.Top + y;
+                            for (int x = left + 1; x < right - 1; x += 2)
+                            {
+                                if (Math.Max(a.Texture(x, previousY), b.Texture(x, currentY)) < 18)
+                                {
+                                    continue;
+                                }
+
+                                int pixelDifference = a.Difference(b, x, previousY, x, currentY);
+                                difference += pixelDifference;
+                                textured++;
+                                if (pixelDifference <= 42)
+                                {
+                                    matched++;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                int minimumEvidence = Math.Max(28, matches.Count * 12);
+                if (textured >= minimumEvidence)
+                {
+                    double average = difference / (double)textured;
+                    double ratio = matched / (double)textured;
+                    state[block] = average <= 42 && ratio >= 0.58 ? (sbyte)1 : (sbyte)-1;
+                }
+            }
+
+            FillShortUnknownGaps(state, 2);
+            int bestStart = -1;
+            int bestLength = 0;
+            for (int index = 0; index < state.Length;)
+            {
+                if (state[index] != 1)
+                {
+                    index++;
+                    continue;
+                }
+
+                int start = index;
+                while (index < state.Length && state[index] == 1)
+                {
+                    index++;
+                }
+
+                int length = index - start;
+                if (length > bestLength)
+                {
+                    bestStart = start;
+                    bestLength = length;
+                }
+            }
+
+            if (bestStart < 0 || bestLength * blockWidth < roughBounds.Width / 3)
+            {
+                return roughBounds;
+            }
+
+            int regionStart = bestStart;
+            while (regionStart > 0 && state[regionStart - 1] == 0)
+            {
+                regionStart--;
+            }
+
+            int regionEnd = bestStart + bestLength;
+            while (regionEnd < state.Length && state[regionEnd] == 0)
+            {
+                regionEnd++;
+            }
+
+            int refinedLeft = Math.Max(roughBounds.Left, roughBounds.Left + regionStart * blockWidth - blockWidth);
+            int refinedRight = Math.Min(
+                roughBounds.Right,
+                roughBounds.Left + regionEnd * blockWidth);
+            int minimumWidth = Math.Min(roughBounds.Width, Math.Max(1, (int)Math.Ceiling(roughBounds.Width * 0.85)));
+            if (refinedRight - refinedLeft < minimumWidth)
+            {
+                int missing = minimumWidth - (refinedRight - refinedLeft);
+                int growLeft = Math.Min(refinedLeft - roughBounds.Left, missing / 2);
+                refinedLeft -= growLeft;
+                missing -= growLeft;
+                refinedRight = Math.Min(roughBounds.Right, refinedRight + missing);
+                missing = minimumWidth - (refinedRight - refinedLeft);
+                refinedLeft = Math.Max(roughBounds.Left, refinedLeft - missing);
+            }
+
+            return Rectangle.FromLTRB(refinedLeft, roughBounds.Top, refinedRight, roughBounds.Bottom);
+        }
+
+        private static void FillShortUnknownGaps(sbyte[] values, int maximumGap)
+        {
+            int index = 0;
+            while (index < values.Length)
+            {
+                if (values[index] != 0)
+                {
+                    index++;
+                    continue;
+                }
+
+                int start = index;
+                while (index < values.Length && values[index] == 0)
+                {
+                    index++;
+                }
+
+                if (start > 0 && index < values.Length &&
+                    values[start - 1] == 1 && values[index] == 1 &&
+                    index - start <= maximumGap)
+                {
+                    for (int fill = start; fill < index; fill++)
+                    {
+                        values[fill] = 1;
+                    }
+                }
+            }
+        }
+
+        private static VerticalMatch FindVerticalMatch(Bitmap previous, Bitmap current, Rectangle bounds)
+        {
+            int maxShift = Math.Max(0, bounds.Height - Math.Max(24, bounds.Height / 10));
+            int bestShift = 0;
+            double bestScore = double.MaxValue;
+            int bestSamples = 0;
+
+            using (var a = new PixelBuffer(previous))
+            using (var b = new PixelBuffer(current))
+            {
+                int xStep = Math.Max(2, bounds.Width / 70);
+                for (int shift = 0; shift <= maxShift; shift += 2)
+                {
+                    VerticalMatch candidate = ScoreVerticalShift(a, b, bounds, shift, xStep);
+                    if (candidate.Samples >= 24 && candidate.Score < bestScore)
+                    {
+                        bestScore = candidate.Score;
                         bestShift = shift;
+                        bestSamples = candidate.Samples;
+                    }
+                }
+
+                int fineStart = Math.Max(0, bestShift - 2);
+                int fineEnd = Math.Min(maxShift, bestShift + 2);
+                for (int shift = fineStart; shift <= fineEnd; shift++)
+                {
+                    VerticalMatch candidate = ScoreVerticalShift(a, b, bounds, shift, xStep);
+                    if (candidate.Samples >= 24 && candidate.Score < bestScore)
+                    {
+                        bestScore = candidate.Score;
+                        bestShift = shift;
+                        bestSamples = candidate.Samples;
                     }
                 }
             }
 
-            if (bestScore > 28)
+            return new VerticalMatch
             {
-                return Math.Max(1, bounds.Height - Math.Min(DefaultOverlap, bounds.Height / 4));
+                Shift = bestShift,
+                Score = bestScore,
+                Samples = bestSamples,
+                IsReliable = bestSamples >= 24 && bestScore <= 48
+            };
+        }
+
+        private static VerticalMatch ScoreVerticalShift(
+            PixelBuffer previous,
+            PixelBuffer current,
+            Rectangle bounds,
+            int shift,
+            int xStep)
+        {
+            int overlap = bounds.Height - shift;
+            long difference = 0;
+            int samples = 0;
+            for (int y = 2; y < overlap - 2; y += 2)
+            {
+                int previousY = bounds.Top + shift + y;
+                int currentY = bounds.Top + y;
+                for (int x = bounds.Left + 2; x < bounds.Right - 2; x += xStep)
+                {
+                    if (Math.Max(previous.Texture(x, previousY), current.Texture(x, currentY)) < 18)
+                    {
+                        continue;
+                    }
+
+                    difference += previous.Difference(current, x, previousY, x, currentY);
+                    samples++;
+                }
             }
 
-            return bestShift;
+            return new VerticalMatch
+            {
+                Shift = shift,
+                Score = samples == 0 ? double.MaxValue : difference / (double)samples,
+                Samples = samples
+            };
+        }
+
+        private static bool HasMeaningfulVerticalScroll(Bitmap previous, Bitmap current)
+        {
+            var pair = new List<Bitmap> { previous, current };
+            Rectangle bounds = DetectScrollingBounds(pair);
+            if (bounds.IsEmpty)
+            {
+                return false;
+            }
+
+            VerticalMatch match = FindVerticalMatch(previous, current, bounds);
+            return match.IsReliable && match.Shift > 0;
+        }
+
+        private struct VerticalMatch
+        {
+            public int Shift;
+            public double Score;
+            public int Samples;
+            public bool IsReliable;
         }
 
         private static bool LooksSame(Bitmap a, Bitmap b)
@@ -2983,6 +3379,13 @@ namespace PinShotWin
                 return Math.Abs(pixels[first] - other.pixels[second]) +
                     Math.Abs(pixels[first + 1] - other.pixels[second + 1]) +
                     Math.Abs(pixels[first + 2] - other.pixels[second + 2]);
+            }
+
+            public int Texture(int x, int y)
+            {
+                int horizontal = Difference(this, x - 1, y, x + 1, y);
+                int vertical = Difference(this, x, y - 1, x, y + 1);
+                return Math.Max(horizontal, vertical);
             }
 
             public void Dispose()

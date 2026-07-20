@@ -101,19 +101,26 @@ if ($IncludeUi) {
 
     $annotationPath = Join-Path $uiOut "annotation.png"
     $scrollPath = Join-Path $uiOut "scroll.png"
+    $editorScrollPath = Join-Path $uiOut "scroll-editor.png"
     $movedSelectionPath = Join-Path $uiOut "moved-selection.png"
     $annotationOrderPath = Join-Path $uiOut "annotation-order.png"
     $diagonalArrowPath = Join-Path $uiOut "arrow-diagonal.png"
     Assert-True (Test-Path -LiteralPath $annotationPath) "Missing annotation self-test image"
     Assert-True (Test-Path -LiteralPath $scrollPath) "Missing scroll self-test image"
+    Assert-True (Test-Path -LiteralPath $editorScrollPath) "Missing editor scroll self-test image"
     Assert-True (Test-Path -LiteralPath $movedSelectionPath) "Missing moved selection self-test image"
     Assert-True (Test-Path -LiteralPath $annotationOrderPath) "Missing annotation order self-test image"
     Assert-True (Test-Path -LiteralPath $diagonalArrowPath) "Missing diagonal arrow self-test image"
     Assert-True ((Get-Content -LiteralPath (Join-Path $uiOut "text-escape.txt") -Raw).Trim() -eq "pass") "Escape did not cancel text editing cleanly"
+    $previewLayout = (Get-Content -LiteralPath (Join-Path $uiOut "scroll_preview_layout.txt") -Raw).Trim().Split(',')
+    $previewWidth = [int]$previewLayout[2]
+    $previewHeight = [int]$previewLayout[3]
+    Assert-True ($previewWidth -eq 412 -and $previewHeight -eq 824) "Scrolling preview was not scaled proportionally: ${previewWidth}x${previewHeight}"
 
     Add-Type -AssemblyName System.Drawing
     $annotation = [System.Drawing.Bitmap]::FromFile($annotationPath)
     $scroll = [System.Drawing.Bitmap]::FromFile($scrollPath)
+    $editorScroll = [System.Drawing.Bitmap]::FromFile($editorScrollPath)
     $movedSelection = [System.Drawing.Bitmap]::FromFile($movedSelectionPath)
     $annotationOrder = [System.Drawing.Bitmap]::FromFile($annotationOrderPath)
     $diagonalArrow = [System.Drawing.Bitmap]::FromFile($diagonalArrowPath)
@@ -121,6 +128,10 @@ if ($IncludeUi) {
         Assert-True ($annotation.Width -eq 180 -and $annotation.Height -eq 180) "Unexpected annotation image size"
         Assert-True ($scroll.Width -lt 300 -and $scroll.Width -ge 220) "Scroll stitch did not remove the fixed sidebar"
         Assert-True ($scroll.Height -ge 650 -and $scroll.Height -le 665) "Unexpected scroll image height: $($scroll.Height)"
+        Assert-True ($editorScroll.Width -ge 260 -and $editorScroll.Width -le 285) "Editor scroll retained side UI: $($editorScroll.Width) px"
+        Assert-True ($editorScroll.Height -eq 660) "Editor scroll retained fixed rows or appended a settled frame: $($editorScroll.Height) px"
+        $editorUiPixels = [int](Get-Content -LiteralPath (Join-Path $uiOut "scroll_editor_ui_pixels.txt") -Raw)
+        Assert-True ($editorUiPixels -eq 0) "Editor scroll retained $editorUiPixels side-UI pixels"
         $redProbe = $annotation.GetPixel(20, 20)
         Assert-True ($redProbe.R -gt 150 -and $redProbe.G -lt 100) "Annotation rectangle probe did not render red"
         $movedProbe = $movedSelection.GetPixel(20, 20)
@@ -135,6 +146,7 @@ if ($IncludeUi) {
     finally {
         $annotation.Dispose()
         $scroll.Dispose()
+        $editorScroll.Dispose()
         $movedSelection.Dispose()
         $annotationOrder.Dispose()
         $diagonalArrow.Dispose()
